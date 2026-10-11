@@ -481,8 +481,15 @@ case "\${1:-}" in
     esac
     ;;
   capture-pane) printf 'working\n' ;;
-  display-message) printf '0\n' ;;
-  *) exit 0 ;;
+  display-message)
+    for a in "\$@"; do
+      case "\$a" in
+        *pane_current_command*) printf 'claude\n'; exit 0 ;;
+        *cursor_y*) printf '0\n'; exit 0 ;;
+      esac
+    done
+    exit 0
+    ;;
 esac
 SH
   chmod +x "$fakebin/tmux"
