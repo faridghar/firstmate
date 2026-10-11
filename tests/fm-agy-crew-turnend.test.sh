@@ -127,11 +127,17 @@ EOF
   jq -e '."fm-crew-busy".Stop' "$hooks" >/dev/null \
     || fail "spawn did not add fm-crew-busy Stop hook"
 
+  # Assert skip-worktree is active so tracked hooks.json is not visible to git status
+  ls_flags=$(git -C "$WT_DIR" ls-files -v .agents/hooks.json | awk '{print $1}')
+  [ "$ls_flags" = "S" ] || fail "tracked .agents/hooks.json must have skip-worktree set (S), got '$ls_flags'"
+  dirty_status=$(git -C "$WT_DIR" status --porcelain .agents/hooks.json)
+  [ -z "$dirty_status" ] || fail "tracked .agents/hooks.json must be clean in git status, got '$dirty_status'"
+
   pass "agy crewmate: spawn merges fm-crew-busy without clobbering pre-existing hooks"
 }
 
 test_agy_crew_wiring_cleanup_preserves_other_hooks() {
-  local rec id=crew-clean-1 out state hooks
+  local rec id=crew-clean-1 out state hooks ls_flags dirty_status
   rec=$(make_case clean-hooks "$id")
   read_case "$rec"
 
@@ -162,6 +168,12 @@ EOF
   if jq -e '."fm-crew-busy"' "$hooks" >/dev/null 2>&1; then
     fail "fm-crew-busy was not pruned from hooks.json"
   fi
+
+  # Assert no-skip-worktree is restored and worktree is clean
+  ls_flags=$(git -C "$WT_DIR" ls-files -v .agents/hooks.json | awk '{print $1}')
+  [ "$ls_flags" = "H" ] || fail "tracked .agents/hooks.json must have normal status (H) after cleanup, got '$ls_flags'"
+  dirty_status=$(git -C "$WT_DIR" status --porcelain .agents/hooks.json)
+  [ -z "$dirty_status" ] || fail "tracked .agents/hooks.json must be clean in git status after cleanup, got '$dirty_status'"
 
   pass "agy crewmate: wiring cleanup prunes fm-crew-busy while preserving existing project hooks"
 }

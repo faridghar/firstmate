@@ -472,8 +472,21 @@ fm_control_clear_harness_wiring() {  # <harness> <worktree> <state-dir> <id> [ki
         else
           rm -f "$tmp_hooks"
         fi
-        continue
+      else
+        rm -f -- "$path" || return 1
       fi
+      if git -C "$wt" ls-files --error-unmatch .agents/hooks.json >/dev/null 2>&1; then
+        git -C "$wt" update-index --no-skip-worktree .agents/hooks.json 2>/dev/null || true
+        if [ ! -f "$path" ]; then
+          git -C "$wt" checkout -- .agents/hooks.json 2>/dev/null || true
+        elif command -v jq >/dev/null 2>&1; then
+          head_hooks=$(git -C "$wt" show HEAD:.agents/hooks.json 2>/dev/null || true)
+          if [ -n "$head_hooks" ] && jq -e -n --arg a "$head_hooks" --arg b "$(cat "$path")" '($a | fromjson) == ($b | fromjson)' >/dev/null 2>&1; then
+            git -C "$wt" checkout -- .agents/hooks.json 2>/dev/null || true
+          fi
+        fi
+      fi
+      continue
     fi
     rm -f -- "$path" || return 1
   done <<EOF

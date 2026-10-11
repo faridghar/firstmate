@@ -4863,6 +4863,9 @@ BUSY_GEN=
 EOF
     fi
     exclude_path '.agents/hooks.json'
+    if git -C "$WT" ls-files --error-unmatch .agents/hooks.json >/dev/null 2>&1; then
+      git -C "$WT" update-index --skip-worktree .agents/hooks.json 2>/dev/null || true
+    fi
     ;;
   devin)
     if [ "$RAW_LAUNCH" -eq 0 ]; then

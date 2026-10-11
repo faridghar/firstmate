@@ -1854,10 +1854,23 @@ cleanup_worktree_harness_wiring() {  # <wt>
         else
           rm -f "$tmp_hooks"
         fi
-        return 0
+      else
+        rm -f "$hooks"
+      fi
+    else
+      rm -f "$hooks"
+    fi
+    if git -C "$wt" ls-files --error-unmatch .agents/hooks.json >/dev/null 2>&1; then
+      git -C "$wt" update-index --no-skip-worktree .agents/hooks.json 2>/dev/null || true
+      if [ ! -f "$hooks" ]; then
+        git -C "$wt" checkout -- .agents/hooks.json 2>/dev/null || true
+      elif command -v jq >/dev/null 2>&1; then
+        head_hooks=$(git -C "$wt" show HEAD:.agents/hooks.json 2>/dev/null || true)
+        if [ -n "$head_hooks" ] && jq -e -n --arg a "$head_hooks" --arg b "$(cat "$hooks")" '($a | fromjson) == ($b | fromjson)' >/dev/null 2>&1; then
+          git -C "$wt" checkout -- .agents/hooks.json 2>/dev/null || true
+        fi
       fi
     fi
-    rm -f "$hooks"
   fi
 }
 
