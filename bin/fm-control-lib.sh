@@ -461,29 +461,23 @@ fm_control_clear_harness_wiring() {  # <harness> <worktree> <state-dir> <id> [ki
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     if [ "$harness" = agy ] && [ "$path" = "$wt/.agents/hooks.json" ] && [ -f "$path" ] && command -v jq >/dev/null 2>&1; then
-      other_keys=$(jq 'del(."fm-crew-busy") | keys | length' "$path" 2>/dev/null || echo 0)
-      case "$other_keys" in
-        ''|*[!0-9]*) other_keys=0 ;;
-      esac
-      if [ "$other_keys" -gt 0 ]; then
-        tmp_hooks="$path.tmp.$$"
-        if jq 'del(."fm-crew-busy")' "$path" > "$tmp_hooks" 2>/dev/null; then
-          mv -f "$tmp_hooks" "$path"
-        else
-          rm -f "$tmp_hooks"
-        fi
+      tmp_hooks="$path.tmp.$$"
+      if jq 'del(."fm-crew-busy")' "$path" > "$tmp_hooks" 2>/dev/null; then
+        mv -f "$tmp_hooks" "$path"
       else
-        rm -f -- "$path" || return 1
+        rm -f "$tmp_hooks"
       fi
       if git -C "$wt" ls-files --error-unmatch .agents/hooks.json >/dev/null 2>&1; then
         git -C "$wt" update-index --no-skip-worktree .agents/hooks.json 2>/dev/null || true
-        if [ ! -f "$path" ]; then
+        head_hooks=$(git -C "$wt" show HEAD:.agents/hooks.json 2>/dev/null || true)
+        if [ -n "$head_hooks" ] && jq -e -n --arg a "$head_hooks" --arg b "$(cat "$path")" '($a | fromjson) == ($b | fromjson)' >/dev/null 2>&1; then
           git -C "$wt" checkout -- .agents/hooks.json 2>/dev/null || true
-        elif command -v jq >/dev/null 2>&1; then
-          head_hooks=$(git -C "$wt" show HEAD:.agents/hooks.json 2>/dev/null || true)
-          if [ -n "$head_hooks" ] && jq -e -n --arg a "$head_hooks" --arg b "$(cat "$path")" '($a | fromjson) == ($b | fromjson)' >/dev/null 2>&1; then
-            git -C "$wt" checkout -- .agents/hooks.json 2>/dev/null || true
-          fi
+        fi
+      else
+        other_keys=$(jq 'keys | length' "$path" 2>/dev/null || echo 0)
+        case "$other_keys" in ''|*[!0-9]*) other_keys=0 ;; esac
+        if [ "$other_keys" -eq 0 ]; then
+          rm -f -- "$path" || return 1
         fi
       fi
       continue
