@@ -283,6 +283,21 @@ test_park_inert_when_only_passive_checks_exist() {
   pass "fm-turnend-guard-agy: inert when only passive checks exist and no work in flight"
 }
 
+test_park_inert_when_inflight_tasks_are_idle() {
+  local dir out decision
+  dir=$(make_primary_dir "$TMP_ROOT/inflight-idle")
+  : > "$dir/state/task1.meta"
+  printf 'v1 gen=g1 seq=1 state=idle source=agy-hook event=stop ts=1000\n' > "$dir/state/task1.busy-state"
+  printf 'done [at=1000]: pr created\n' > "$dir/state/task1.status"
+  write_arm_fixture "$dir" actionable
+
+  out=$(run_park "$dir")
+  decision=$(decision_of "$out")
+  [ "$decision" = "allow" ] || fail "home with only idle/done tasks must allow stop, got: $out"
+  [ ! -e "$dir/state/arm-ran" ] || fail "arm should not run when tasks are idle"
+  pass "fm-turnend-guard-agy: inert when in-flight tasks are idle or done"
+}
+
 test_park_delivers_actionable_wake() {
   local dir out decision reason kind
   dir=$(make_primary_dir "$TMP_ROOT/actionable-wake")
@@ -410,6 +425,7 @@ test_park_inert_on_non_model_stop
 test_park_inert_in_away_mode
 test_park_inert_when_supervision_not_needed
 test_park_inert_when_only_passive_checks_exist
+test_park_inert_when_inflight_tasks_are_idle
 test_park_delivers_actionable_wake
 test_park_delivers_repair_followup_and_bounds_budget
 test_park_enforces_loop_ceiling

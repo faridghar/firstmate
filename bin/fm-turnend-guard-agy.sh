@@ -276,10 +276,44 @@ if ! fm_supervision_needed "$STATE" "$GRACE"; then
   emit_allow
 fi
 
+# Active task predicate: only active execution or unresolved decisions justify a blocking park.
+# Tasks whose workers are idle or terminal (e.g. waiting for PR review) are handled by
+# background PR polls and do not lock an interactive session behind a blocking Stop hook.
+fm_has_active_tasks() {
+  local state=$1 meta id b_state last_verb
+  for meta in "$state"/*.meta; do
+    [ -e "$meta" ] || continue
+    id=$(basename "$meta" .meta)
+    if [ -f "$state/$id.busy-state" ]; then
+      b_state=$(sed -n 's/.*state=\([a-z]*\).*/\1/p' "$state/$id.busy-state" 2>/dev/null || true)
+      [ "$b_state" = "busy" ] && return 0
+      [ "$b_state" = "idle" ] && continue
+    fi
+    if [ -f "$state/$id.status" ]; then
+      last_verb=$(grep -E '^[[:space:]]*(done|failed|needs-decision|blocked|paused|working)' "$state/$id.status" 2>/dev/null | tail -1 | awk '{print $1}')
+      case "$last_verb" in
+        done|failed) continue ;;
+      esac
+    fi
+    return 0
+  done
+  return 1
+}
+
+park_captain_input_pending() {
+  local pane
+  command -v herdr >/dev/null 2>&1 || return 1
+  pane=$(herdr pane list 2>/dev/null | jq -r --arg cid "$SESSION_ID" --arg cwd "$FM_HOME" '
+    .result.panes[] | select((.agent_session.value == $cid) or (.cwd == $cwd and .foreground_cwd == $cwd)) | .pane_id
+  ' 2>/dev/null | head -1)
+  [ -n "$pane" ] || return 1
+  herdr pane read "$pane" 2>/dev/null | tail -10 | grep -Eq 'Press up to edit queued messages|▸ '
+}
+
 # Antigravity CLI park requires active in-flight work or active Relay watch.
-# Background checks (e.g. contributions poll) and idle event sources alone
-# do not lock an idle interactive session behind a blocking Stop hook.
-if [ "$FM_SUP_IN_FLIGHT" -eq 0 ] && [ ! -f "$STATE/x-watch.check.sh" ]; then
+# Background checks (e.g. contributions poll, PR merge polls) and idle/done tasks
+# do not lock an interactive session behind a blocking Stop hook.
+if { [ "$FM_SUP_IN_FLIGHT" -eq 0 ] || ! fm_has_active_tasks "$STATE"; } && [ ! -f "$STATE/x-watch.check.sh" ]; then
   budget_reset_if_ours
   emit_allow
 fi
@@ -310,7 +344,7 @@ while [ "$attempt" -lt "$ARM_ATTEMPTS" ]; do
   fi
   ARM_PID=$!
   while kill -0 "$ARM_PID" 2>/dev/null; do
-    if ! park_still_ours || ! current_session_still_ours || [ -e "$STATE/.afk" ]; then
+    if ! park_still_ours || ! current_session_still_ours || [ -e "$STATE/.afk" ] || park_captain_input_pending; then
       STAND_DOWN=1
       break
     fi
@@ -349,7 +383,7 @@ if ! fm_supervision_needed "$STATE" "$GRACE"; then
   budget_reset_if_ours
   emit_allow
 fi
-if [ "$FM_SUP_IN_FLIGHT" -eq 0 ] && [ ! -f "$STATE/x-watch.check.sh" ]; then
+if { [ "$FM_SUP_IN_FLIGHT" -eq 0 ] || ! fm_has_active_tasks "$STATE"; } && [ ! -f "$STATE/x-watch.check.sh" ]; then
   budget_reset_if_ours
   emit_allow
 fi
