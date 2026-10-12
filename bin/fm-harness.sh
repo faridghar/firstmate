@@ -236,11 +236,11 @@ harness_process_verdict() {  # <pid>
     # agy (Antigravity CLI) is a Go-compiled single binary whose process name
     # is exactly `agy` (verified, agy 1.2.0: `ps -o comm=` reports agy and
     # Herdr's process-info reports name agy with argv[0] agy). Anchored, never
-    # *agy*, so unrelated commands cannot be misread as this harness. agy
-    # publishes no harness-identity marker of its own (a live 1.2.0 TUI
-    # carries no AGY_* or ANTIGRAVITY_* variable; AGENT=1 seen there is an
-    # inherited launcher value, not an agy identity), so like muse it is
-    # detected by ancestry alone.
+    # *agy*, so unrelated commands cannot be misread as this harness.
+    # While Antigravity agents can set ANTIGRAVITY_AGENT=1 or AGY_AGENT=1 environmental
+    # markers (processed by `harness_marker`), this entry identifies it by
+    # command name (`comm`) or `argv0` alone. This helps resolve ambiguity with
+    # inherited `AGENT=1` values or other generic markers for child processes.
     agy|agy.exe|antigravity|antigravity.exe) echo "comm agy"; return ;;
     devin) echo "comm devin"; return ;;
     node*|python*)
