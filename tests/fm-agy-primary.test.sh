@@ -287,15 +287,46 @@ test_park_inert_when_inflight_tasks_are_idle() {
   local dir out decision
   dir=$(make_primary_dir "$TMP_ROOT/inflight-idle")
   : > "$dir/state/task1.meta"
+  printf 'pr=https://github.com/example/repo/pull/1\n' >> "$dir/state/task1.meta"
   printf 'v1 gen=g1 seq=1 state=idle source=agy-hook event=stop ts=1000\n' > "$dir/state/task1.busy-state"
   printf 'done [at=1000]: pr created\n' > "$dir/state/task1.status"
   write_arm_fixture "$dir" actionable
 
   out=$(run_park "$dir")
   decision=$(decision_of "$out")
-  [ "$decision" = "allow" ] || fail "home with only idle/done tasks must allow stop, got: $out"
-  [ ! -e "$dir/state/arm-ran" ] || fail "arm should not run when tasks are idle"
-  pass "fm-turnend-guard-agy: inert when in-flight tasks are idle or done"
+  [ "$decision" = "allow" ] || fail "home with only idle PR-registered tasks must allow stop, got: $out"
+  [ ! -e "$dir/state/arm-ran" ] || fail "arm should not run when tasks are idle PR-registered tasks"
+  pass "fm-turnend-guard-agy: inert when in-flight tasks are idle PR-registered tasks"
+}
+
+test_park_runs_when_inflight_task_done_unregistered() {
+  local dir out decision
+  dir=$(make_primary_dir "$TMP_ROOT/inflight-done-unregistered")
+  : > "$dir/state/task1.meta"
+  printf 'v1 gen=g1 seq=1 state=idle source=agy-hook event=stop ts=1000\n' > "$dir/state/task1.busy-state"
+  printf 'done [at=1000]: ready in branch fm/task1\n' > "$dir/state/task1.status"
+  write_arm_fixture "$dir" actionable
+
+  out=$(run_park "$dir")
+  decision=$(decision_of "$out")
+  [ "$decision" = "continue" ] || fail "unregistered completed task must deliver continue wake, got: $out"
+  [ -e "$dir/state/arm-ran" ] || fail "arm must run when completed task is not yet registered as a PR"
+  pass "fm-turnend-guard-agy: delivers wake for completed task awaiting landing or PR registration"
+}
+
+test_park_delivers_wake_when_task_worker_idle() {
+  local dir out decision
+  dir=$(make_primary_dir "$TMP_ROOT/inflight-wake-idle-worker")
+  : > "$dir/state/task1.meta"
+  printf 'pr=https://github.com/example/repo/pull/1\n' >> "$dir/state/task1.meta"
+  printf 'v1 gen=g1 seq=1 state=idle source=agy-hook event=stop ts=1000\n' > "$dir/state/task1.busy-state"
+  printf 'check: pr-poll task1 merged\n' > "$dir/state/.wake-queue"
+  write_arm_fixture "$dir" actionable
+
+  out=$(run_park "$dir")
+  decision=$(decision_of "$out")
+  [ "$decision" = "continue" ] || fail "queued wake must deliver continue decision even when tasks are idle, got: $out"
+  pass "fm-turnend-guard-agy: delivers queued wake even when in-flight tasks are idle"
 }
 
 test_park_delivers_actionable_wake() {
@@ -426,6 +457,8 @@ test_park_inert_in_away_mode
 test_park_inert_when_supervision_not_needed
 test_park_inert_when_only_passive_checks_exist
 test_park_inert_when_inflight_tasks_are_idle
+test_park_runs_when_inflight_task_done_unregistered
+test_park_delivers_wake_when_task_worker_idle
 test_park_delivers_actionable_wake
 test_park_delivers_repair_followup_and_bounds_budget
 test_park_enforces_loop_ceiling

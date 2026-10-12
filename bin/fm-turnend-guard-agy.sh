@@ -276,26 +276,31 @@ if ! fm_supervision_needed "$STATE" "$GRACE"; then
   emit_allow
 fi
 
-# Active task predicate: only active execution or unresolved decisions justify a blocking park.
-# Tasks whose workers are idle or terminal (e.g. waiting for PR review) are handled by
-# background PR polls and do not lock an interactive session behind a blocking Stop hook.
+# Active task predicate: an in-flight task requires supervision unless it has
+# already been recorded as an open PR awaiting external review/merge (pr= in meta)
+# with an idle worker. Tasks that have not yet had their PR registered or that
+# use local-only branches require supervision for landing, teardown, or recovery.
 fm_has_active_tasks() {
-  local state=$1 meta id b_state last_verb
+  local state=$1 meta id b_state
   for meta in "$state"/*.meta; do
     [ -e "$meta" ] || continue
     id=$(basename "$meta" .meta)
+
+    # Any pending turn-ended notification for this task requires immediate supervision.
+    [ -f "$state/$id.turn-ended" ] && return 0
+
+    # If the task has not yet been registered as an open PR (bin/fm-pr-check.sh),
+    # it is actively executing or awaiting landing/teardown/reporting.
+    if ! grep -q '^pr=' "$meta" 2>/dev/null; then
+      return 0
+    fi
+
+    # For PR-registered tasks: if the worker is still actively executing,
+    # it is still an active task.
     if [ -f "$state/$id.busy-state" ]; then
       b_state=$(sed -n 's/.*state=\([a-z]*\).*/\1/p' "$state/$id.busy-state" 2>/dev/null || true)
       [ "$b_state" = "busy" ] && return 0
-      [ "$b_state" = "idle" ] && continue
     fi
-    if [ -f "$state/$id.status" ]; then
-      last_verb=$(grep -E '^[[:space:]]*(done|failed|needs-decision|blocked|paused|working)' "$state/$id.status" 2>/dev/null | tail -1 | awk '{print $1}')
-      case "$last_verb" in
-        done|failed) continue ;;
-      esac
-    fi
-    return 0
   done
   return 1
 }
@@ -310,10 +315,12 @@ park_captain_input_pending() {
   herdr pane read "$pane" 2>/dev/null | tail -10 | grep -Eq 'Press up to edit queued messages|▸ '
 }
 
-# Antigravity CLI park requires active in-flight work or active Relay watch.
-# Background checks (e.g. contributions poll, PR merge polls) and idle/done tasks
+# Antigravity CLI park requires active in-flight work, pending wakes, or active Relay watch.
+# Background checks (e.g. contributions poll, PR merge polls) and PR-registered idle tasks
 # do not lock an interactive session behind a blocking Stop hook.
-if { [ "$FM_SUP_IN_FLIGHT" -eq 0 ] || ! fm_has_active_tasks "$STATE"; } && [ ! -f "$STATE/x-watch.check.sh" ]; then
+if [ -s "$STATE/.wake-queue" ]; then
+  : # Queued wake pending: must not bypass
+elif { [ "$FM_SUP_IN_FLIGHT" -eq 0 ] || ! fm_has_active_tasks "$STATE"; } && [ ! -f "$STATE/x-watch.check.sh" ]; then
   budget_reset_if_ours
   emit_allow
 fi
@@ -378,22 +385,24 @@ while [ "$attempt" -lt "$ARM_ATTEMPTS" ]; do
   ARM_OUT=
 done
 
-# The need may have vanished while parked.
-if ! fm_supervision_needed "$STATE" "$GRACE"; then
-  budget_reset_if_ours
-  emit_allow
-fi
-if { [ "$FM_SUP_IN_FLIGHT" -eq 0 ] || ! fm_has_active_tasks "$STATE"; } && [ ! -f "$STATE/x-watch.check.sh" ]; then
-  budget_reset_if_ours
-  emit_allow
-fi
-
 if [ "$ACTIONABLE" -eq 1 ]; then
   WAKE=$(grep -E '^(signal:|stale:|check:|heartbeat)' "$ARM_OUT" 2>/dev/null | head -8)
   emit_continue watcher "firstmate watcher wake - one supervision event needs a handling turn now.
 $WAKE
 
 Run bin/fm-wake-drain.sh first, handle the wake, then run its exact WAKE_ACK_REQUIRED --ack-through command. Until that post-handling acknowledgement, interruption leaves the wake durable for idempotent re-handling. This Stop hook owns watcher continuity: when the handling turn ends, the next needed cycle parks automatically - do NOT run bin/fm-watch-arm.sh after an ordinary wake." reset-budget
+fi
+
+# The need may have vanished while parked.
+if ! fm_supervision_needed "$STATE" "$GRACE"; then
+  budget_reset_if_ours
+  emit_allow
+fi
+if [ -s "$STATE/.wake-queue" ]; then
+  : # Queued wake pending: must not bypass
+elif { [ "$FM_SUP_IN_FLIGHT" -eq 0 ] || ! fm_has_active_tasks "$STATE"; } && [ ! -f "$STATE/x-watch.check.sh" ]; then
+  budget_reset_if_ours
+  emit_allow
 fi
 
 # A verified live cycle with a fresh beacon is positive recovery.
