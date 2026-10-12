@@ -90,7 +90,7 @@ fm_antigravity_session_pid() {
     return 0
   fi
   local pid
-  pid=$(pgrep -n -f 'agy(\.exe)?' 2>/dev/null || true)
+  pid=$(pgrep -n -f '(^|/)(antigravity|agy)(\.exe)?( |$)' 2>/dev/null || true)
   if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
     printf '%s\n' "$pid"
     return 0
