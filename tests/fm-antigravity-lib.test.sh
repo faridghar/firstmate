@@ -111,6 +111,50 @@ test_session_pid_respects_isolation_seams() {
   pass "fm_antigravity_session_pid: respects test isolation seams"
 }
 
+test_session_pid_env_overrides() {
+  local got
+  got=$(env -u TMP_ROOT -u FM_TEST_SEAM AGY_AGENT=1 ANTIGRAVITY_PID=$$ bash -c ". '$LIB'; fm_antigravity_session_pid")
+  [ "$got" = "$$" ] || fail "expected '$$', got '$got'"
+
+  got=$(env -u TMP_ROOT -u FM_TEST_SEAM -u ANTIGRAVITY_PID AGY_AGENT=1 AGY_PID=$$ bash -c ". '$LIB'; fm_antigravity_session_pid")
+  [ "$got" = "$$" ] || fail "expected '$$', got '$got'"
+  pass "fm_antigravity_session_pid: respects ANTIGRAVITY_PID and AGY_PID overrides"
+}
+
+test_session_pid_finds_process_via_pgrep() {
+  local dir fakebin got dummy_pid
+  dir="$TMP_ROOT/session-pgrep"
+  fakebin=$(fm_fakebin "$dir/bin")
+
+  # Start a dummy process so kill -0 succeeds on the mock PID
+  sleep 30 &
+  dummy_pid=$!
+
+  cat << EOF > "$fakebin/pgrep"
+#!/bin/sh
+echo "$dummy_pid"
+EOF
+  chmod +x "$fakebin/pgrep"
+
+  got=$(PATH="$fakebin:$PATH" env -u TMP_ROOT -u FM_TEST_SEAM -u ANTIGRAVITY_PID -u AGY_PID AGY_AGENT=1 \
+    bash -c ". '$LIB'; fm_antigravity_session_pid")
+  kill "$dummy_pid" 2>/dev/null || true
+  wait "$dummy_pid" 2>/dev/null || true
+
+  [ "$got" = "$dummy_pid" ] || fail "expected '$dummy_pid' from mock pgrep, got '$got'"
+
+  # When pgrep finds no process, returns 1
+  cat << 'EOF' > "$fakebin/pgrep"
+#!/bin/sh
+exit 1
+EOF
+  if PATH="$fakebin:$PATH" env -u TMP_ROOT -u FM_TEST_SEAM -u ANTIGRAVITY_PID -u AGY_PID AGY_AGENT=1 \
+    bash -c ". '$LIB'; fm_antigravity_session_pid" 2>/dev/null; then
+    fail "empty pgrep must cause fm_antigravity_session_pid to return 1"
+  fi
+  pass "fm_antigravity_session_pid: correctly finds and returns PID via pgrep"
+}
+
 test_resolve_binary_from_path
 test_resolve_binary_fallback
 test_resolve_binary_fails_cleanly_when_missing
@@ -118,3 +162,6 @@ test_process_matches_exact_and_prefixed
 test_is_active_env_markers
 test_is_active_config_harness
 test_session_pid_respects_isolation_seams
+test_session_pid_env_overrides
+test_session_pid_finds_process_via_pgrep
+
