@@ -11,13 +11,13 @@ CONFIG_AGY="${FM_CONFIG_OVERRIDE:-$FM_HOME_AGY/config}"
 # Resolves the antigravity / agy binary path
 fm_antigravity_resolve_binary() {
   local candidate
-  for candidate in agy agy.exe; do
+  for candidate in agy agy.exe antigravity antigravity.exe; do
     if command -v "$candidate" >/dev/null 2>&1; then
       type -P "$candidate"
       return 0
     fi
   done
-  for candidate in /usr/local/bin/agy /mnt/c/Users/oguz_/AppData/Local/agy/bin/agy.exe; do
+  for candidate in "$HOME/.local/bin/agy" /usr/local/bin/agy; do
     if [ -x "$candidate" ]; then
       printf '%s\n' "$candidate"
       return 0
@@ -29,6 +29,7 @@ fm_antigravity_resolve_binary() {
 # Checks if a command name or argument list represents an Antigravity process
 fm_antigravity_process_matches() {  # <comm> <args> [argv0]
   local comm=$1 args=${2:-} argv0=${3:-} base
+  : "${args:-}"
   [ -n "$comm" ] || [ -n "$argv0" ] || return 1
   argv0=${argv0:-$comm}
   base=$(basename -- "$comm")
@@ -47,7 +48,6 @@ fm_antigravity_is_active() {
   [ -n "${FM_TEST_SEAM:-}" ] && return 1
   [ "${ANTIGRAVITY_AGENT:-0}" = "1" ] && return 0
   [ "${AGY_AGENT:-0}" = "1" ] && return 0
-  [ "${GEMINI_AGENT:-0}" = "1" ] && return 0
   local config_harness=""
   if [ -f "$CONFIG_AGY/harness" ]; then
     config_harness=$(tr -d '[:space:]' < "$CONFIG_AGY/harness" 2>/dev/null || true)
@@ -77,7 +77,7 @@ fm_antigravity_session_pid() {
   [ -n "${FM_TEST_CLAUDE_SHAPE:-}" ] && return 1
 
   # Only resolve if explicitly configured or indicated by env
-  if [ "${ANTIGRAVITY_AGENT:-0}" != "1" ] && [ "${AGY_AGENT:-0}" != "1" ] && [ "${GEMINI_AGENT:-0}" != "1" ] && [ "$config_harness" != "antigravity" ] && [ "$config_harness" != "agy" ]; then
+  if [ "${ANTIGRAVITY_AGENT:-0}" != "1" ] && [ "${AGY_AGENT:-0}" != "1" ] && [ "$config_harness" != "antigravity" ] && [ "$config_harness" != "agy" ]; then
     return 1
   fi
 

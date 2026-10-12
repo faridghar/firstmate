@@ -83,6 +83,14 @@ CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 # marker is present. Markers only report what the environment CLAIMS; detect_own
 # decides whether that claim survives contradicting ancestry.
 harness_marker() {
+  # Cursor is tested BEFORE claude, deliberately. cursor-agent does NOT clear an
+  # inherited CLAUDECODE, so a cursor session started by hand from a claude
+  # primary carries BOTH markers and whichever is tested first wins. This
+  # ordering only settles the case where ancestry finds nothing to arbitrate
+  # with; a nearer claude ancestor still outranks both in detect_own.
+  # Verified live on cursor-agent 2026.08.11-e8db854: CURSOR_INVOKED_AS=cursor-agent
+  # is set on the agent process itself, and CURSOR_AGENT=1 is set for the
+  # child/tool processes this script runs as.
   [ "${CURSOR_AGENT:-}" = "1" ] && { echo cursor; return; }
   [ "${CURSOR_INVOKED_AS:-}" = "cursor-agent" ] && { echo cursor; return; }
   # Gemini is checked BEFORE claude for exactly cursor's reason above: the
@@ -128,6 +136,14 @@ harness_marker() {
     return
   fi
   # grok set GROK_AGENT=1 for its child/tool processes (verified, grok 0.2.73).
+  # It does NOT set CLAUDECODE despite being Claude-Code-compatible, so the marker
+  # is unambiguous WHEN PRESENT - but it is not guaranteed present. A grok 1.0.0
+  # hook process carries GROK_HOOK_EVENT, GROK_HOOK_NAME, GROK_SESSION_ID, and
+  # GROK_WORKSPACE_ROOT with no GROK_AGENT at all (verified from the live process
+  # environment of a wedged grok 1.0.0 Stop hook, 2026-08-07). Treat this marker as
+  # a fast path only; the ancestry walk below is what actually guarantees grok is
+  # identified, and any rule that must be RELIABLE under grok has to test the hook
+  # markers too (see .claude/settings.json Stop entries, docs/turnend-guard.md).
   [ "${GROK_AGENT:-}" = "1" ] && { echo grok; return; }
   [ "${ANTIGRAVITY_AGENT:-}" = "1" ] && { echo agy; return; }
   [ "${AGY_AGENT:-}" = "1" ] && { echo agy; return; }
@@ -197,7 +213,6 @@ harness_process_verdict() {  # <pid>
     *grok*) echo "comm grok"; return ;;
     kimi) echo "comm kimi"; return ;;
     rovo) echo "comm rovo"; return ;;
-    agy|agy.exe|antigravity|antigravity.exe) echo "comm agy"; return ;;
     # muse's installed launcher ~/.local/bin/muse execs ~/.local/bin/muse-bin-<version>
     # (verified in the published launcher, muse 0.1.0-R708.1), so the live process
     # name carries the version and CHANGES on every auto-update. Match the stable
@@ -226,7 +241,7 @@ harness_process_verdict() {  # <pid>
     # carries no AGY_* or ANTIGRAVITY_* variable; AGENT=1 seen there is an
     # inherited launcher value, not an agy identity), so like muse it is
     # detected by ancestry alone.
-    agy) echo "comm agy"; return ;;
+    agy|agy.exe|antigravity|antigravity.exe) echo "comm agy"; return ;;
     devin) echo "comm devin"; return ;;
     node*|python*)
       # Bare interpreter: match the harness name in its script path.
