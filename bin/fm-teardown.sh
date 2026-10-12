@@ -1836,12 +1836,9 @@ cleanup_stale_lock_for_safety_check() {
   return "$TEARDOWN_TREEHOUSE_LOCK_REFUSED"
 }
 
-cleanup_worktree_harness_wiring() {  # <wt>
+cleanup_worktree_agents_hooks() {  # <wt>
   local wt=$1 hooks other_keys tmp_hooks head_hooks
   [ -d "$wt" ] || return 0
-  rm -f "$wt/.claude/settings.local.json" "$wt/.opencode/plugins/fm-turn-end.js" \
-    "$wt/.opencode/plugins/fm-busy-state.js" \
-    "$wt/.fm-grok-turnend" "$wt/.fm-kimi-turnend"
   hooks="$wt/.agents/hooks.json"
   if [ -f "$hooks" ]; then
     if command -v jq >/dev/null 2>&1; then
@@ -1871,6 +1868,15 @@ cleanup_worktree_harness_wiring() {  # <wt>
       fi
     fi
   fi
+}
+
+cleanup_worktree_harness_wiring() {  # <wt>
+  local wt=$1
+  [ -d "$wt" ] || return 0
+  rm -f "$wt/.claude/settings.local.json" "$wt/.opencode/plugins/fm-turn-end.js" \
+    "$wt/.opencode/plugins/fm-busy-state.js" \
+    "$wt/.fm-grok-turnend" "$wt/.fm-kimi-turnend"
+  cleanup_worktree_agents_hooks "$wt"
 }
 
 # Return a worktree/home via `treehouse return --force`, tolerating a transient or
@@ -2007,7 +2013,7 @@ validate_worktree_teardown_safety() {
     secondmate|scout) return 0 ;;
   esac
 
-  cleanup_worktree_harness_wiring "$WT"
+  cleanup_worktree_agents_hooks "$WT"
 
   if ! dirty_raw=$(git -C "$WT" status --porcelain 2>/dev/null); then
     if worktree_safety_blocked_by_lock "uncommitted changes"; then
