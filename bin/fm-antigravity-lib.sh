@@ -71,6 +71,7 @@ fm_antigravity_session_pid() {
   fi
 
   # Tests setting mock process tables must not see ambient external processes
+  [ -n "${FM_TEST_SEAM:-}" ] && return 1
   [ -n "${TMP_ROOT:-}" ] && return 1
   [ -n "${FM_TEST_PID1_COMM:-}" ] && return 1
   [ -n "${FM_TEST_PATH_SHAPE:-}" ] && return 1
