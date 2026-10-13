@@ -19,6 +19,9 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/herdr-test-safety.sh
+. "$(dirname "${BASH_SOURCE[0]}")/herdr-test-safety.sh"
+herdr_forget_inherited_pane
 
 TMP_ROOT=$(fm_test_tmproot fm-agy-primary)
 fm_git_identity fmtest fmtest@example.invalid
@@ -65,7 +68,8 @@ install_scripts() {
            fm-path-lib.sh fm-classify-lib.sh fm-timeout-lib.sh \
            fm-session-lock-lib.sh fm-cursor-lib.sh fm-operational-input.sh \
            fm-supervision-instructions.sh fm-harness.sh fm-lock.sh \
-           fm-gate-refuse-lib.sh fm-supervision-engine-lib.sh; do
+           fm-gate-refuse-lib.sh fm-supervision-engine-lib.sh \
+           fm-watch-herdr-bridge.sh; do
     [ -f "$ROOT/bin/$f" ] && cp "$ROOT/bin/$f" "$dir/bin/$f"
   done
   cp -R "$ROOT/docs/supervision-protocols" "$dir/docs/supervision-protocols"
@@ -449,6 +453,40 @@ test_hooks_json_commands_execute_cleanly() {
   pass "hooks.json: Stop and PreToolUse commands execute cleanly with valid decisions"
 }
 
+test_turnend_guard_herdr_instant_allow_and_bridge() {
+  local dir out decision bpid
+  dir=$(make_primary_dir "$TMP_ROOT/herdr-instant-allow")
+  : > "$dir/state/task1.meta"
+  write_arm_fixture "$dir" switchable
+
+  # In Herdr with active task, Stop hook should emit allow immediately
+  out=$(HERDR_ENV=1 HERDR_PANE_ID="wTest:p1" run_park "$dir")
+  decision=$(decision_of "$out")
+  [ "$decision" = "allow" ] || fail "Herdr primary must allow stop immediately without blocking, got: $out"
+  [ -f "$dir/state/.herdr-bridge.pid" ] || fail "Herdr bridge PID file must be created"
+
+  # Clean up bridge process
+  bpid=$(cat "$dir/state/.herdr-bridge.pid" 2>/dev/null || true)
+  [ -n "$bpid" ] && kill "$bpid" 2>/dev/null || true
+  rm -f "$dir/state/.herdr-bridge.pid" "$dir/state/.herdr-bridge.lock"
+
+  pass "fm-turnend-guard-agy: Herdr primary releases prompt immediately with allow and starts bridge"
+}
+
+test_turnend_guard_herdr_delivers_continue_on_queued_wake() {
+  local dir out decision
+  dir=$(make_primary_dir "$TMP_ROOT/herdr-queued-wake")
+  : > "$dir/state/task1.meta"
+  printf 'signal: task1 status changed\n' > "$dir/state/.wake-queue"
+  write_arm_fixture "$dir" actionable
+
+  out=$(HERDR_ENV=1 HERDR_PANE_ID="wTest:p1" run_park "$dir")
+  decision=$(decision_of "$out")
+  [ "$decision" = "continue" ] || fail "queued wake must deliver continue immediately even in Herdr, got: $out"
+
+  pass "fm-turnend-guard-agy: Herdr primary delivers continue immediately when wake is queued"
+}
+
 test_turnend_guard_supports_agy_flag
 test_park_inert_when_not_primary
 test_park_inert_on_foreign_host
@@ -464,4 +502,7 @@ test_park_delivers_repair_followup_and_bounds_budget
 test_park_enforces_loop_ceiling
 test_park_supersession_stands_down
 test_hooks_json_commands_execute_cleanly
+test_turnend_guard_herdr_instant_allow_and_bridge
+test_turnend_guard_herdr_delivers_continue_on_queued_wake
+
 

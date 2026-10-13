@@ -214,6 +214,59 @@ $reason"
   exit 0
 }
 
+# --- Herdr supervisor bridge -------------------------------------------------
+fm_herdr_primary_pane() {
+  if [ "${HERDR_ENV:-}" = "1" ] && [ -n "${HERDR_PANE_ID:-}" ]; then
+    printf '%s\n' "$HERDR_PANE_ID"
+    return 0
+  fi
+  command -v herdr >/dev/null 2>&1 || return 1
+  herdr status >/dev/null 2>&1 || return 1
+  herdr pane list 2>/dev/null | jq -r --arg cid "$SESSION_ID" --arg cwd "$FM_HOME" '
+    .result.panes[] | select((.agent_session.value == $cid) or (.cwd == $cwd and .foreground_cwd == $cwd)) | .pane_id
+  ' 2>/dev/null | head -1
+}
+
+ensure_herdr_bridge() {
+  local pane=$1 pid monitor_was_on=0
+  if [ -f "$STATE/.herdr-bridge.pid" ]; then
+    pid=$(cat "$STATE/.herdr-bridge.pid" 2>/dev/null || true)
+    case "$pid" in
+      ''|*[!0-9]*) rm -f "$STATE/.herdr-bridge.pid" ;;
+      *)
+        if kill -0 "$pid" 2>/dev/null; then
+          return 0
+        fi
+        rm -f "$STATE/.herdr-bridge.pid"
+        ;;
+    esac
+  fi
+  case $- in *m*) monitor_was_on=1 ;; esac
+  set -m 2>/dev/null || true
+  nohup "$SCRIPT_DIR/fm-watch-herdr-bridge.sh" --pane "$pane" --session "$SESSION_ID" >/dev/null 2>&1 </dev/null &
+  pid=$!
+  [ "$monitor_was_on" -eq 1 ] || set +m 2>/dev/null || true
+  printf '%s\n' "$pid" > "$STATE/.herdr-bridge.pid"
+}
+
+kill_herdr_bridge() {
+  local pid
+  [ -f "$STATE/.herdr-bridge.pid" ] || return 0
+  pid=$(cat "$STATE/.herdr-bridge.pid" 2>/dev/null || true)
+  case "$pid" in
+    ''|*[!0-9]*) ;;
+    *) kill "$pid" 2>/dev/null || true ;;
+  esac
+  rm -f "$STATE/.herdr-bridge.pid" "$STATE/.herdr-bridge.lock"
+}
+
+park_captain_input_pending() {
+  local pane
+  pane=$(fm_herdr_primary_pane) || return 1
+  [ -n "$pane" ] || return 1
+  herdr pane read "$pane" 2>/dev/null | tail -10 | grep -Eq 'Press up to edit queued messages|▸ '
+}
+
 # --- park ownership ----------------------------------------------------------
 claim_park() {
   local seq tmp
@@ -269,7 +322,10 @@ if [ "$LOOP_COUNT" -ge "$LOOP_CEILING" ]; then
 fi
 
 # Away mode owns the watcher and its own triage; never park and never continue.
-[ -e "$STATE/.afk" ] && emit_allow
+if [ -e "$STATE/.afk" ]; then
+  kill_herdr_bridge
+  emit_allow
+fi
 
 if ! fm_supervision_needed "$STATE" "$GRACE"; then
   budget_reset_if_ours
@@ -305,22 +361,23 @@ fm_has_active_tasks() {
   return 1
 }
 
-park_captain_input_pending() {
-  local pane
-  command -v herdr >/dev/null 2>&1 || return 1
-  pane=$(herdr pane list 2>/dev/null | jq -r --arg cid "$SESSION_ID" --arg cwd "$FM_HOME" '
-    .result.panes[] | select((.agent_session.value == $cid) or (.cwd == $cwd and .foreground_cwd == $cwd)) | .pane_id
-  ' 2>/dev/null | head -1)
-  [ -n "$pane" ] || return 1
-  herdr pane read "$pane" 2>/dev/null | tail -10 | grep -Eq 'Press up to edit queued messages|▸ '
-}
-
 # Antigravity CLI park requires active in-flight work, pending wakes, or active Relay watch.
 # Background checks (e.g. contributions poll, PR merge polls) and PR-registered idle tasks
 # do not lock an interactive session behind a blocking Stop hook.
 if [ -s "$STATE/.wake-queue" ]; then
   : # Queued wake pending: must not bypass
 elif { [ "$FM_SUP_IN_FLIGHT" -eq 0 ] || ! fm_has_active_tasks "$STATE"; } && [ ! -f "$STATE/x-watch.check.sh" ]; then
+  kill_herdr_bridge
+  budget_reset_if_ours
+  emit_allow
+fi
+
+# When running inside Herdr, the detached supervisor bridge owns autonomous prompt
+# injection on wake, allowing the interactive session to release the prompt to '>'
+# immediately (<20ms) instead of blocking behind a 60-second Stop hook.
+HERDR_PANE=$(fm_herdr_primary_pane)
+if [ -n "$HERDR_PANE" ] && [ ! -s "$STATE/.wake-queue" ]; then
+  ensure_herdr_bridge "$HERDR_PANE"
   budget_reset_if_ours
   emit_allow
 fi
