@@ -27,6 +27,7 @@ TMP_ROOT=$(fm_test_tmproot fm-agy-primary)
 fm_git_identity fmtest fmtest@example.invalid
 
 FAKEBIN=$(fm_fakebin "$TMP_ROOT/fakebin")
+export PATH="$FAKEBIN:$PATH"
 CC_BIN=$(command -v cc 2>/dev/null || command -v gcc 2>/dev/null || true)
 [ -n "$CC_BIN" ] || fail "a C compiler is required to build the fake agy process"
 cat > "$TMP_ROOT/fake-agy.c" <<'C'
@@ -56,6 +57,42 @@ C
 "$CC_BIN" -o "$FAKEBIN/agy" "$TMP_ROOT/fake-agy.c" \
   || fail "could not build the fake agy process"
 FAKE_AGY="$FAKEBIN/agy"
+
+cat > "$FAKEBIN/herdr" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  status)
+    echo "server: running"
+    exit 0
+    ;;
+  pane)
+    case "${2:-}" in
+      read)
+        echo "normal pane without composer text"
+        exit 0
+        ;;
+      get)
+        echo "{\"result\":{\"pane\":{\"pane_id\":\"${3:-}\"}}}"
+        exit 0
+        ;;
+    esac
+    ;;
+  agent)
+    case "${2:-}" in
+      get)
+        echo "{\"result\":{\"agent\":{\"agent_status\":\"idle\"}}}"
+        exit 0
+        ;;
+      prompt)
+        [ -n "${FM_HOME:-}" ] && printf 'PROMPT_DELIVERED to %s: %s\n' "${3:-}" "${4:-}" >> "$FM_HOME/state/herdr-delivered.log"
+        exit 0
+        ;;
+    esac
+    ;;
+esac
+exit 0
+EOF
+chmod +x "$FAKEBIN/herdr"
 
 AGY_PAYLOAD='{"conversationId":"conv-agy-1","executionNum":1,"terminationReason":"model_stop","fullyIdle":true,"workspacePaths":["/path"]}'
 CURSOR_PAYLOAD='{"session_id":"sess-cursor","cursor_version":"2026.08.11-e8db854"}'
@@ -118,11 +155,13 @@ SH
       cat > "$dir/bin/fm-watch-arm.sh" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$$" >> "$FM_HOME/state/arm-ran"
-if [ -e "$FM_HOME/state/arm-fast" ]; then
-  printf 'stale: task-fast wake\n'
-  exit 0
-fi
-sleep 30
+for _ in $(seq 1 300); do
+  if [ -e "$FM_HOME/state/arm-fast" ]; then
+    printf 'stale: task-fast wake\n'
+    exit 0
+  fi
+  sleep 0.1
+done
 printf 'stale: task-late wake\n'
 exit 0
 SH
@@ -487,6 +526,70 @@ test_turnend_guard_herdr_delivers_continue_on_queued_wake() {
   pass "fm-turnend-guard-agy: Herdr primary delivers continue immediately when wake is queued"
 }
 
+test_turnend_guard_herdr_bridge_survives_hook_exit_and_delivers_wake() {
+  local dir out decision bpid hpid
+  dir=$(make_primary_dir "$TMP_ROOT/herdr-bridge-wake")
+  : > "$dir/state/task1.meta"
+  write_arm_fixture "$dir" switchable
+
+  # Start fake agy running a child script that writes $PPID as lock owner, runs the hook,
+  # and stays alive sleeping (simulating the interactive agy session waiting at the prompt '>').
+  cat > "$dir/harness-child.sh" << 'SH'
+printf '%s\n' "$PPID" > "$FM_HOME/state/.lock"
+"$FM_HOME/bin/fm-turnend-guard-agy.sh"
+sleep 15
+SH
+  chmod +x "$dir/harness-child.sh"
+
+  HERDR_ENV=1 HERDR_PANE_ID="wTest:p1" \
+    env FM_HOME="$dir" FM_AGY_PARK_POLL=1 \
+    "$FAKE_AGY" -c "$dir/harness-child.sh" > "$dir/state/hook.out" 2>/dev/null << 'EOF' &
+{"conversationId":"conv-agy-1","executionNum":1,"terminationReason":"model_stop","fullyIdle":true}
+EOF
+  hpid=$!
+
+  # Wait for hook to complete and emit allow
+  for _ in {1..30}; do
+    [ -s "$dir/state/hook.out" ] && break
+    sleep 0.1
+  done
+
+  out=$(cat "$dir/state/hook.out" 2>/dev/null || true)
+  decision=$(decision_of "$out")
+  [ "$decision" = "allow" ] || fail "Herdr primary must allow stop immediately without blocking, got: $out"
+
+  # Verify bridge started and is running
+  bpid=$(cat "$dir/state/.herdr-bridge.pid" 2>/dev/null || true)
+  [ -n "$bpid" ] || fail "Herdr bridge PID file must exist"
+  kill -0 "$bpid" 2>/dev/null || fail "Herdr bridge must survive hook exit and remain alive (pid $bpid)"
+
+  # Trigger actionable wake via arm fixture
+  touch "$dir/state/arm-fast"
+
+  # Wait for wake prompt delivery via mock herdr
+  for _ in {1..50}; do
+    [ -s "$dir/state/herdr-delivered.log" ] && break
+    sleep 0.1
+  done
+
+  [ -s "$dir/state/herdr-delivered.log" ] || fail "Herdr bridge must deliver wake prompt via herdr agent prompt"
+  grep -q 'PROMPT_DELIVERED to wTest:p1:' "$dir/state/herdr-delivered.log" \
+    || fail "delivered prompt must target pane wTest:p1, got: $(cat "$dir/state/herdr-delivered.log")"
+  grep -q 'stale: task-fast wake' "$dir/state/herdr-delivered.log" \
+    || fail "delivered prompt must contain wake payload, got: $(cat "$dir/state/herdr-delivered.log")"
+
+  # Terminate harness session; bridge must detect dead session and exit
+  kill "$hpid" 2>/dev/null || true
+  for _ in {1..40}; do
+    kill -0 "$bpid" 2>/dev/null || break
+    sleep 0.1
+  done
+  kill -0 "$bpid" 2>/dev/null && { kill -9 "$bpid" 2>/dev/null || true; fail "bridge must exit when harness session dies"; }
+  rm -f "$dir/state/.herdr-bridge.pid" "$dir/state/.herdr-bridge.lock"
+
+  pass "fm-turnend-guard-agy: Herdr bridge survives hook exit and delivers wake prompt"
+}
+
 test_turnend_guard_supports_agy_flag
 test_park_inert_when_not_primary
 test_park_inert_on_foreign_host
@@ -504,5 +607,7 @@ test_park_supersession_stands_down
 test_hooks_json_commands_execute_cleanly
 test_turnend_guard_herdr_instant_allow_and_bridge
 test_turnend_guard_herdr_delivers_continue_on_queued_wake
+test_turnend_guard_herdr_bridge_survives_hook_exit_and_delivers_wake
+
 
 

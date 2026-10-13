@@ -23,3 +23,6 @@ When this session owns supervision and away mode is not active:
 The watcher itself remains `bin/fm-watch.sh`, and `bin/fm-watch-arm.sh` remains the verified arm wrapper that the `Stop` hook runs as its own tracked child.
 Re-arm attaches to an existing healthy cycle when one is already present and follows its verified successor chain.
 See [`watcher-continuity.md`](../watcher-continuity.md) for the arm-layer successor and clean-close failure contract.
+
+Inside Herdr, `bin/fm-watch-herdr-bridge.sh` and `fm-turnend-guard-agy.sh` detect composer activity by reading the rendered pane (`▸ ` or `Press up to edit queued messages`), verified against Antigravity CLI 1.3.4. Rendered-surface reads are a named, version-pinned adapter debt until a structured pane-state query is exposed.
+

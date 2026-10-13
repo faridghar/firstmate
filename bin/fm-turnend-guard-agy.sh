@@ -216,11 +216,11 @@ $reason"
 
 # --- Herdr supervisor bridge -------------------------------------------------
 fm_herdr_primary_pane() {
+  command -v herdr >/dev/null 2>&1 || return 1
   if [ "${HERDR_ENV:-}" = "1" ] && [ -n "${HERDR_PANE_ID:-}" ]; then
     printf '%s\n' "$HERDR_PANE_ID"
     return 0
   fi
-  command -v herdr >/dev/null 2>&1 || return 1
   herdr status >/dev/null 2>&1 || return 1
   herdr pane list 2>/dev/null | jq -r --arg cid "$SESSION_ID" --arg cwd "$FM_HOME" '
     .result.panes[] | select((.agent_session.value == $cid) or (.cwd == $cwd and .foreground_cwd == $cwd)) | .pane_id
@@ -243,7 +243,7 @@ ensure_herdr_bridge() {
   fi
   case $- in *m*) monitor_was_on=1 ;; esac
   set -m 2>/dev/null || true
-  nohup "$SCRIPT_DIR/fm-watch-herdr-bridge.sh" --pane "$pane" --session "$SESSION_ID" >/dev/null 2>&1 </dev/null &
+  nohup "$SCRIPT_DIR/fm-watch-herdr-bridge.sh" --pane "$pane" --session "$SESSION_ID" --owner "$OWNER_ID" >/dev/null 2>&1 </dev/null &
   pid=$!
   [ "$monitor_was_on" -eq 1 ] || set +m 2>/dev/null || true
   printf '%s\n' "$pid" > "$STATE/.herdr-bridge.pid"

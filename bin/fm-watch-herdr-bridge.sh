@@ -25,6 +25,8 @@ LOCK_FILE="$STATE/.herdr-bridge.lock"
 . "$SCRIPT_DIR/fm-session-lock-lib.sh"
 
 SESSION_ID=
+OWNER_ID=
+PANE_ID=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --pane)
@@ -37,6 +39,11 @@ while [ "$#" -gt 0 ]; do
       SESSION_ID=$2
       shift 2
       ;;
+    --owner)
+      [ "$#" -gt 1 ] || { echo "error: --owner requires a value" >&2; exit 2; }
+      OWNER_ID=$2
+      shift 2
+      ;;
     *)
       shift
       ;;
@@ -47,6 +54,10 @@ done
 # shellcheck disable=SC2034 # May be inspected by session validation probes
 SESSION_IDENT="$SESSION_ID"
 command -v herdr >/dev/null 2>&1 || exit 1
+
+if [ -z "${OWNER_ID:-}" ]; then
+  OWNER_ID=$(cat "$STATE/.lock" 2>/dev/null || true)
+fi
 
 # Acquire singleton lock
 if ! fm_lock_try_acquire "$LOCK_FILE"; then
@@ -63,6 +74,16 @@ trap cleanup EXIT INT TERM HUP
 
 printf '%s\n' "$$" > "$PID_FILE"
 
+is_session_owner_live() {
+  local lock_pid
+  lock_pid=$(cat "$STATE/.lock" 2>/dev/null || true)
+  case "$lock_pid" in ''|*[!0-9]*) return 1 ;; esac
+  if [ -n "${OWNER_ID:-}" ]; then
+    [ "$lock_pid" = "$OWNER_ID" ] || return 1
+  fi
+  fm_harness_pid_alive "$lock_pid" || return 1
+}
+
 is_captain_input_pending() {
   local pane=$1
   herdr pane read "$pane" 2>/dev/null | tail -10 | grep -Eq 'Press up to edit queued messages|▸ '
@@ -70,7 +91,7 @@ is_captain_input_pending() {
 
 while :; do
   # Check session lock
-  if ! fm_session_lock_owned_by_self "$STATE"; then
+  if ! is_session_owner_live; then
     break
   fi
 
@@ -94,11 +115,11 @@ while :; do
   ARM_PID=$!
 
   while kill -0 "$ARM_PID" 2>/dev/null; do
-    if ! fm_session_lock_owned_by_self "$STATE" || [ -e "$STATE/.afk" ]; then
+    if ! is_session_owner_live || [ -e "$STATE/.afk" ]; then
       kill "$ARM_PID" 2>/dev/null
       break 2
     fi
-    sleep 2
+    sleep 0.5
   done
   wait "$ARM_PID" 2>/dev/null || true
   ARM_PID=
@@ -122,13 +143,13 @@ Run bin/fm-wake-drain.sh first, handle the wake, then run its exact WAKE_ACK_REQ
     delivery_attempts=0
     while [ "$delivery_attempts" -lt 30 ]; do
       delivery_attempts=$((delivery_attempts + 1))
-      if ! fm_session_lock_owned_by_self "$STATE" || [ -e "$STATE/.afk" ]; then
+      if ! is_session_owner_live || [ -e "$STATE/.afk" ]; then
         break 2
       fi
 
       agent_status=$(herdr agent get "$PANE_ID" 2>/dev/null | jq -r '.result.agent.agent_status // empty' 2>/dev/null || true)
       case "$agent_status" in
-        idle|done)
+        idle|done|"")
           if ! is_captain_input_pending "$PANE_ID"; then
             if herdr agent prompt "$PANE_ID" "$PROMPT" 2>/dev/null; then
               break
@@ -140,7 +161,7 @@ Run bin/fm-wake-drain.sh first, handle the wake, then run its exact WAKE_ACK_REQ
           break
           ;;
       esac
-      sleep 1
+      sleep 0.5
     done
 
     sleep 1
