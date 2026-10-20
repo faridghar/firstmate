@@ -1,28 +1,35 @@
-Mode: Antigravity CLI (agy) Stop-hook-owned park.
+Mode: Antigravity CLI (agy) background-notify supervision.
 
 When this session owns supervision and away mode is not active:
 1. Drain first with `bin/fm-wake-drain.sh`.
-   After handling all emitted wakes and reconciling open decisions, run the exact `--ack-through` command printed as `WAKE_ACK_REQUIRED`; until then the work remains durable for idempotent re-handling after interruption.
-2. Routine watcher arm and re-arm are owned by the `Stop` hook (`bin/fm-turnend-guard-agy.sh`), never by you.
-   Antigravity CLI runs that hook synchronously at the end of each turn, so every turn end while supervision is needed parks the turn boundary open on one home-scoped watcher cycle, with no model command and no model tokens spent while parked.
-3. An actionable close wakes you by returning a `continue` decision with the reason injected as a system message.
-   On that wake, run `bin/fm-wake-drain.sh` first and handle it.
-   Do not run `bin/fm-watch-arm.sh` after an ordinary wake; the next turn end parks again automatically when supervision is still needed.
-   Do not invent a wake from an attach-status line alone; drain and act only on real wake records, the drain's `OPEN DECISIONS` entries, or a real watcher reason line.
-4. The captain keeps control while the hook is parked.
-   A message typed into an Antigravity pane is accepted, and an older park still running detects supersession via `state/.agy-park-owner` and stands down cleanly with `{"decision": "allow"}`.
-   The private supersession records are `state/.agy-park-owner` and its short publication and commit lock `state/.agy-park-owner.lock`.
-5. On a `turn-end-guard` follow-up, the park could not establish a live cycle.
-   Inspect the watcher startup path rather than turning the notice into a repeating manual-arm loop; the nag is bounded by `FM_AGY_TURNEND_BLOCK_BUDGET` (default 3) and then stops on its own.
-6. Treat `watcher: started ...` and `watcher: attached ...` inside park output as proof that one live cycle exists.
-   On attach, the arm follows verified identity-matched successors instead of exiting when the first cycle ends.
-7. The durable wake queue preserves actionable events between a follow-up and the next park.
-   [`watcher-continuity.md`](../watcher-continuity.md) owns the exact session-lock recovery boundary.
-8. Waiting on the hook-owned park is silent: do not send idle progress while the watcher is parked.
+   After handling all emitted wakes and reconciling open decisions and unread status lines, run the exact `--ack-through` command printed as `WAKE_ACK_REQUIRED`; until then the work remains durable for idempotent re-handling after interruption.
+2. Source `__FM_X_MODE_ENV__` first when Relay is active.
+3. First cycle: arm with Antigravity's tracked background command tool, as its own standalone call:
 
-The watcher itself remains `bin/fm-watch.sh`, and `bin/fm-watch-arm.sh` remains the verified arm wrapper that the `Stop` hook runs as its own tracked child.
-Re-arm attaches to an existing healthy cycle when one is already present and follows its verified successor chain.
-See [`watcher-continuity.md`](../watcher-continuity.md) for the arm-layer successor and clean-close failure contract.
+   `run_command` with `WaitMsBeforeAsync: 1000` (and `IsDaemon: false`) on:
+   `[ -f __FM_X_MODE_ENV_SH__ ] && . __FM_X_MODE_ENV_SH__; exec bin/fm-watch-arm.sh`
 
-Inside Herdr, `bin/fm-watch-herdr-bridge.sh` and `fm-turnend-guard-agy.sh` detect composer activity by reading the rendered pane (`▸ ` or `Press up to edit queued messages`), verified against Antigravity CLI 1.3.4. Rendered-surface reads are a named, version-pinned adapter debt until a structured pane-state query is exposed.
+4. Trust only the arm's one-line status.
+5. `watcher: started ...` or `watcher: attached ...` means a live cycle exists.
+   On attach, the background task follows verified identity-matched successors instead of exiting when the first cycle ends.
+6. Failure or missing cycle only: `watcher: FAILED ...` means supervision is down; fix and re-arm.
+7. After a successful start or attach status, end the turn by calling no more tools.
+   The background arm remains the live wait until it returns an actionable wake or failure.
+   Do not poll with `manage_task`.
+8. Waiting is silent: do not send idle progress while the watcher is parked in the background.
+9. Never use shell `&` or `IsDaemon: true` for firstmate supervision.
+10. Never bundle the arm onto another command.
 
+Antigravity's reactive wakeup automatically resumes execution when the background `bin/fm-watch-arm.sh` task completes.
+When a background-task completion message arrives for the arm:
+1. Run `bin/fm-wake-drain.sh` first.
+2. Handle `signal`, `stale`, `check`, or `heartbeat` using the harness-neutral contract in `AGENTS.md`, then run the exact `WAKE_ACK_REQUIRED --ack-through` command.
+3. Ordinary wake: re-arm the next cycle with the same background `bin/fm-watch-arm.sh` call (`run_command` with `WaitMsBeforeAsync: 1000`) if the home still needs supervision, as `bin/fm-supervision-lib.sh` defines it.
+4. Do not invent a wake from an attach-status line alone.
+   Drain the queue and act only on real wake records, the drain's `OPEN DECISIONS` and `UNREAD STATUS` entries, or a real watcher reason line.
+   Re-arm attaches to an existing healthy cycle when one is already present and follows its verified successor chain.
+   See [`watcher-continuity.md`](../watcher-continuity.md) for the arm-layer successor and clean-close failure contract.
+
+The primary project `Stop` hook runs `bin/fm-turnend-guard-agy.sh` as a fast non-blocking backstop, not the normal wake path.
+When a healthy watcher cycle is already running, the `Stop` hook returns `{"decision": "allow"}` immediately.
+When active tasks are in flight with no healthy watcher cycle (or when unread wakes remain queued in `state/.wake-queue`), the `Stop` hook returns a bounded `{"decision": "continue", "reason": "..."}` follow-up so the session drains or re-arms with the background protocol above before ending the turn.

@@ -55,7 +55,7 @@ On Herdr, the native `working` and `idle` status acts as a verified backend auth
 
 Supported as a persistent secondmate adapter.
 `bin/fm-agy-trust.sh --secondmate-home <home> <id>` validates the secondmate home marker (`.fm-secondmate-home`) and pre-registers the home directory in `~/.gemini/antigravity-cli/settings.json` under `trustedWorkspaces`.
-Secondmate homes supervise their fleets using the same Stop hook park model as the primary supervisor (`docs/supervision-protocols/agy.md`).
+Secondmate homes supervise their fleets using the same background-notify supervision protocol and non-blocking `Stop`-hook backstop as the primary supervisor (`docs/supervision-protocols/agy.md`).
 
 ## Delegation tools and PreToolUse guard
 
@@ -66,8 +66,9 @@ In linked task worktrees, the shared primary-scope check keeps the guard inert s
 
 ## Primary integration
 
-Supported via the synchronous `Stop` hook park model, registered in `.agents/hooks.json` running `bin/fm-turnend-guard-agy.sh`.
-When fleet supervision is active, the hook foregrounds `bin/fm-watch-arm.sh` and parks until an actionable wake arrives, returning `{"decision": "continue", "reason": "..."}` on stdout with exit 0 to immediately re-enter the loop with the wake injected as a system message.
-When supervision is inactive or the session is in away mode (`state/.afk`), it returns `{"decision": "allow"}` to stop cleanly.
-Consecutive hook continuations are bounded by `FM_AGY_TURNEND_LOOP_CEILING` (default 180), and failed parks by `FM_AGY_TURNEND_BLOCK_BUDGET` (default 3) before failing open.
+Supported via Antigravity's tracked background `run_command` tool (`WaitMsBeforeAsync: 1000`) and reactive wakeup, paired with the non-blocking `Stop` hook backstop registered in `.agents/hooks.json` running `bin/fm-turnend-guard-agy.sh` (`docs/supervision-protocols/agy.md`).
+When fleet supervision is active, the primary session arms `bin/fm-watch-arm.sh` via `run_command` (`WaitMsBeforeAsync: 1000`) and receives actionable wakes out-of-band when the background task exits.
+At turn end, `bin/fm-turnend-guard-agy.sh` returns `{"decision": "allow"}` immediately when a healthy watcher cycle is running, supervision is inactive, or the session is in away mode (`state/.afk`).
+When unread wakes remain queued in `state/.wake-queue` or active tasks are in flight with no healthy watcher cycle, the hook returns `{"decision": "continue", "reason": "..."}` on stdout with exit 0 so the session drains or re-arms before stopping.
+Consecutive hook continuations are bounded by `FM_AGY_TURNEND_LOOP_CEILING` (default 180), and missing-watcher repair continuations by `FM_AGY_TURNEND_BLOCK_BUDGET` (default 3) before failing open.
 Shared turn-end guard logic is reached via `bin/fm-turnend-guard.sh --agy`.

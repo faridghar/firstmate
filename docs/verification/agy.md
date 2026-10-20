@@ -161,14 +161,14 @@ A tracked `PreToolUse` hook in `.agents/hooks.json` forwards tool calls to `bin/
 The hook receives a JSON payload on stdin containing `toolCall.name`, matches delegation-shaped stems, and returns `{"decision":"deny","reason":"..."}` on stdout with exit 0.
 The primary scope check (`bin/fm-primary-scope-lib.sh`) keeps the hook inert in task worktrees, preserving crewmate delegation tools while enforcing the fleet boundary in primary homes.
 
-## Primary integration: Stop-hook park model
+## Primary integration: background-notify supervision and Stop-hook backstop
 
-Antigravity CLI (agy) runs as a verified Firstmate primary using its lifecycle hook system (`.agents/hooks.json`).
-At each turn boundary where the execution loop terminates with `terminationReason: "model_stop"`, the tracked `Stop` hook runs `bin/fm-turnend-guard-agy.sh`.
-While fleet supervision is active, the hook foregrounds `bin/fm-watch-arm.sh` and parks until an actionable wake arrives.
-When an actionable wake closes, the hook returns `{"decision": "continue", "reason": "..."}` on stdout with exit 0, causing Antigravity to immediately re-enter the loop with the wake injected as a system message.
-When supervision is inactive or the session is in away mode (`state/.afk`), it returns `{"decision": "allow"}` and allows the agent to stop cleanly.
-Consecutive hook-driven continuations are bounded by `FM_AGY_TURNEND_LOOP_CEILING` (default 180), and consecutive failed park attempts are bounded by `FM_AGY_TURNEND_BLOCK_BUDGET` (default 3) before failing open.
+Antigravity CLI (agy) runs as a verified Firstmate primary using its tracked background `run_command` tool (`WaitMsBeforeAsync`) and reactive wakeup system, backed by the lifecycle `Stop` hook in `.agents/hooks.json` (`docs/supervision-protocols/agy.md`).
+When fleet supervision is active, the primary session arms `bin/fm-watch-arm.sh` via `run_command` (`WaitMsBeforeAsync: 1000`), which confirms a fresh watcher beacon (`watcher: started ...` or `watcher: attached ...`), moves into Antigravity's background task manager, and wakes the session out-of-band when an actionable wake exits the watcher.
+At each turn boundary where the execution loop terminates with `terminationReason: "NO_TOOL_CALL"` (or `"model_stop"`), the tracked `Stop` hook runs `bin/fm-turnend-guard-agy.sh` as a fast non-blocking backstop.
+When a healthy watcher cycle is running, supervision is inactive, or the session is in away mode (`state/.afk`), the hook returns `{"decision": "allow"}` immediately without blocking the prompt.
+When unread wakes remain queued in `state/.wake-queue` at turn end, or when active tasks are in flight with no healthy watcher cycle, the hook returns `{"decision": "continue", "reason": "..."}` on stdout with exit 0 so the session drains or re-arms before ending the turn.
+Consecutive hook-driven continuations are bounded by `FM_AGY_TURNEND_LOOP_CEILING` (default 180), and consecutive missing-watcher repair continuations are bounded by `FM_AGY_TURNEND_BLOCK_BUDGET` (default 3) before failing open.
 Session lock integration in `bin/fm-session-lock-lib.sh` recognizes `agy` in contiguous process ancestry.
 Hermetic regression coverage lives in `tests/fm-agy-primary.test.sh`.
 
