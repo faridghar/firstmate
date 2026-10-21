@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Behavior tests for the verified Antigravity CLI crewmate/scout adapter.
+# Behavior tests for the verified Antigravity CLI adapter.
 #
 # The facts pinned here are the ones an agy release could silently change and
 # the ones a wrong guess would make dangerous:
@@ -22,8 +22,8 @@
 #      ready on an unregistered path until the dialog has been answered (the
 #      Herdr native-busy-before-dialog race), and fails the spawn with endpoint
 #      cleanup when the brief cannot be confirmed to run in the worktree.
-#   5. agy is a crewmate/scout adapter only: a secondmate launch is refused,
-#      and nothing is armed as busy wiring because no writer could clear it.
+#   5. agy supports primary, secondmate, crewmate, and scout roles: a secondmate
+#      launch is allowed, and crewmates arm semantic busy wiring via .agents/hooks.json.
 #   6. The busy signature is the pinned `esc to cancel` status row alone; the
 #      free-floating `Generating...` word must never read busy on its own.
 #   7. Herdr's registry already tracks agy, and exit detection proves the
@@ -160,8 +160,7 @@ test_agy_control_mechanics_are_the_verified_ones() {
   [ "$(fm_control_harness_family agy)" = agy ] || fail "agy must map to its own family"
   fm_control_harness_supports_kind agy scout || fail "agy must run scouts"
   fm_control_harness_supports_kind agy ship || fail "agy must run ships"
-  fm_control_harness_supports_kind agy secondmate \
-    && fail "agy must refuse secondmates" || true
+  fm_control_harness_supports_kind agy secondmate || fail "agy must run secondmates"
   [ "$(fm_control_interrupt_key agy)" = Escape ] || fail "agy must interrupt on Escape"
   [ "$(fm_control_interrupt_repeat agy)" = 1 ] || fail "agy must interrupt on a single press"
   [ -z "$(fm_control_interrupt_clear_key agy)" ] || fail "agy must need no clear key"
