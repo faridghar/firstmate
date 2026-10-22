@@ -21,7 +21,7 @@ Verified as a PRIMARY supervisor, SECONDMATE, and CREWMATE/SCOUT adapter.
 | Resume | `--continue` and `--conversation` exist but carry no verified pane-resume contract; use deterministic relaunch. |
 | Model | `--model <id>` with the bare catalog id from `agy models` (for example `gemini-3.8-flash-high`); `bin/fm-spawn.sh` refuses a requested id a reachable listing omits. The listing is a remote fetch, so the probe runs stdin-detached under the shared hard bound and an unreachable or hung listing launches unvalidated with a notice. |
 | Effort | `--effort low\|medium\|high`; `xhigh` and `max` stay in task metadata under the record-and-omit contract. |
-| Composer | Borderless bare `>` row, which the shared classifier reads as `unknown` under the dead-shell rule, never `empty`; steering confirms delivery through native agent-state and the delivery footer instead, the cursor precedent. |
+| Composer | Separated `─` pair whose first row leads with `>` (`> ` when empty, `> <draft>` when pending), optionally followed by a `─`-bounded `● [HH:MM:SS] <cmd> running` background-task tray above `? for shortcuts`; classified via the shared identity+structure conjunction (`empty` when idle/done, `pending` when text follows `>`, `unknown` when working or without identity). |
 
 ## Trust, and where the decision persists
 

@@ -133,16 +133,16 @@ $ herdr agent get w2:p1 --session fm-lab-firstmate-agy-ad-1599574-8823
 
 Herdr tracks agy natively (`antigravity-cli` integration, detected as `agent=agy`), so `fm_backend_herdr_pane_agent_state` returns `live` for every registered agy status and no exit-detection hardening was needed.
 The tmux adapter classifies the anchored process name `agy` as `agent` through the shared name vocabulary in `bin/fm-agent-process-lib.sh`, the muse/omp precedent for short bare-word names.
-agy stays out of the session-lock name vocabulary in `bin/fm-session-lock-lib.sh`, where the other crewmate-only adapters are also absent.
+`agy` is also registered in `bin/fm-session-lock-lib.sh` so Antigravity CLI can hold the session lock when acting as a primary or secondmate supervisor.
 
-## Composer: unknown by design
+## Composer: identity-gated separated `>` pair
 
-Byte-level capture of the idle pane shows a bare unstyled `>` between two full-width `─` rules, with an unstyled `? for shortcuts` cell and a dim (`SGR 2`) model cell in the status row below.
-The shared classifier reads that bare `>` as `unknown` under the dead-shell rule, never `empty`.
-Steering still confirms delivery: the Herdr submit core leads with the native `idle`-to-`working` transition, which agy performs, and the delivery footer regex covers the tmux path.
+Byte-level capture of the idle pane shows a leading `>` row between two full-width `─` rules, with an unstyled `? for shortcuts` cell and a dim (`SGR 2`) model cell in the status row below; when one or more background `run_command` tasks are active, `agy` renders a `─`-bounded task tray (`  ● [HH:MM:SS] <cmd> running`) immediately below the composer's bottom `─` rule and above `? for shortcuts` (verified live on `agy 1.4.5`).
+Because a bare `>` row is a shell prompt glyph under the dead-shell rule, `bin/fm-composer-lib.sh` classifies `agy`'s composer through the shared separated-pair identity+structure conjunction (`_fm_composer_pi_verdict`, backed by Herdr's `agent get` and `fm_tmux_composer_identity` in `bin/fm-tmux-lib.sh`): an `agy` identity with a valid `>`-led separator pair (preserving that pair above any immediately adjacent `● [HH:MM:SS] ... running` task-tray block) reads `empty` when `idle` or `done` with no text after `>`, `pending` when draft text follows `>` or continues on wrapped rows inside the pair, and `unknown` when `working` or when identity or the separator pair is absent.
+This allows `fm-watch.sh`'s away-mode injector and `fm-task-inbox.sh`'s steering doorbell to prove an idle `agy` primary, secondmate, or worker composer `empty` (with or without active background tasks) while refusing dead shells and bare `>` prompts.
+Steering also confirms delivery through the native `idle`-to-`working` transition on Herdr and the delivery footer regex on tmux.
 agy renders the busy footer late for that confirm loop - about 1.5 s after Enter for a short steer and 4-5 s for a realistic longer brief, measured live on `agy 1.2.1` (2026-09-12) against the shared budget's 3 x 0.4 s - so `bin/fm-send.sh` gives agy typed targets a longer default submit-confirm budget (20 retries, about 8 s at the default cadence); an explicit `FM_SEND_RETRIES` still wins and every other harness keeps the shared 3-retry default.
-`tests/fm-send-agy-confirm.test.sh` pins the raised default and `tests/fm-agy-harness.test.sh` pins the Herdr transition path.
-This is the cursor precedent, not a gap to patch in shared code.
+`tests/fm-send-agy-confirm.test.sh` pins the raised default and `tests/fm-agy-harness.test.sh` and `tests/fm-composer-lib.test.sh` pin the separated composer classification and Herdr transition path.
 
 ## Supervised task: spawn, steer, relaunch, and exit through the new path
 

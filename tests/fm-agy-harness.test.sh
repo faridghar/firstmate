@@ -959,6 +959,60 @@ test_agy_spawn_arms_busy_wiring() {
   pass "fm-spawn: agy arms semantic busy wiring and writes hooks.json"
 }
 
+test_agy_composer_classification_and_tmux_identity() {
+  local fakebin out idle_screen tray_screen typed_screen
+  fakebin=$(fm_fakebin "$TMP_ROOT/tmux-id")
+  cat > "$fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+printf '101 200 200 agy\n'
+SH
+  chmod +x "$fakebin/ps"
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *'#{pane_tty}'*) printf '/dev/pts/42\n' ;;
+  *'#{pane_current_command}'*) printf 'agy\n' ;;
+  *'capture-pane'*) printf '%s\n' "${FAKE_TMUX_PANE:-}" ;;
+  *'#{cursor_y}'*) printf '%s\n' "${FAKE_TMUX_CY:-2}" ;;
+esac
+SH
+  chmod +x "$fakebin/tmux"
+
+  idle_screen=$'● Turn finished\n────────────────────────\n> \n────────────────────────\n  ? for shortcuts                                        Gemini 4 Argon · high'
+  tray_screen=$'● Turn finished\n────────────────────────\n> \n────────────────────────\n  ● [09:03:38] bin/fm-watch-arm.sh running\n────────────────────────\n  ? for shortcuts                        Gemini 4 Argon · high · 1 task(s) · /tasks'
+  typed_screen=$'● Turn finished\n────────────────────────\n> draft steer\n────────────────────────\n  ? for shortcuts                                        Gemini 4 Argon · high'
+
+  out=$(PATH="$fakebin:$PATH" FAKE_TMUX_PANE="$idle_screen" FAKE_TMUX_CY=2 bash -c '
+    . "$0/bin/fm-tmux-lib.sh"
+    fm_tmux_composer_identity fake:0.0
+  ' "$ROOT")
+  [ "$out" = "$(printf 'agy\tidle')" ] \
+    || fail "fm_tmux_composer_identity must report agy<TAB>idle when idle, got '$out'"
+
+  out=$(PATH="$fakebin:$PATH" FAKE_TMUX_PANE="$idle_screen" FAKE_TMUX_CY=2 bash -c '
+    . "$0/bin/fm-tmux-lib.sh"
+    fm_tmux_composer_state fake:0.0
+  ' "$ROOT")
+  [ "$out" = empty ] \
+    || fail "fm_tmux_composer_state must report empty on an idle agy pane, got '$out'"
+
+  out=$(PATH="$fakebin:$PATH" FAKE_TMUX_PANE="$tray_screen" FAKE_TMUX_CY=2 bash -c '
+    . "$0/bin/fm-tmux-lib.sh"
+    fm_tmux_composer_state fake:0.0
+  ' "$ROOT")
+  [ "$out" = empty ] \
+    || fail "fm_tmux_composer_state must report empty on an idle agy pane with a background-task tray, got '$out'"
+
+  out=$(PATH="$fakebin:$PATH" FAKE_TMUX_PANE="$typed_screen" FAKE_TMUX_CY=2 bash -c '
+    . "$0/bin/fm-tmux-lib.sh"
+    fm_tmux_composer_state fake:0.0
+  ' "$ROOT")
+  [ "$out" = pending ] \
+    || fail "fm_tmux_composer_state must report pending on an agy pane with draft text, got '$out'"
+
+  pass "fm-tmux-lib + fm-composer-lib: agy separated composer classifies empty/pending/unknown with tmux identity"
+}
+
 test_agy_ancestry_detects_the_native_command_name
 test_agy_ancestry_rejects_unrelated_mentions
 test_agy_claims_no_inherited_launcher_marker
@@ -990,3 +1044,4 @@ test_agy_pre_trusted_path_that_never_turns_busy_fails_the_spawn
 test_agy_missing_binary_refuses_before_pane_creation
 test_agy_secondmate_is_not_refused_by_adapter_gate
 test_agy_spawn_arms_busy_wiring
+test_agy_composer_classification_and_tmux_identity
