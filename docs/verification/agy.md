@@ -7,8 +7,8 @@ The skill tree rooted at [`.agents/skills/harness-adapters/SKILL.md`](../../.age
 
 | Field | Value |
 |---|---|
-| Version | `agy 1.2.0`; the send-confirmation timing below was re-measured on `agy 1.2.1` (2026-09-12) |
-| Verified | 2026-09-10 |
+| Version | `agy 1.2.0`; the send-confirmation timing below was re-measured on `agy 1.2.1` (2026-09-12), and primary supervision, secondmate support, and separated `>` composer and background-task tray classification were verified on `agy 1.4.5` (2026-10-22) |
+| Verified | 2026-09-10 (refreshed 2026-10-22 on `agy 1.4.5`) |
 | Binary | `/home/andpod/.local/bin/agy`, an ELF 64-bit Go-compiled single executable |
 | Platform | Linux x64 (Arch, kernel 7.2.3) |
 | Backend | Herdr, in an isolated non-`default` lab session (`fm-lab-firstmate-agy-ad-*` via `bin/fm-herdr-lab.sh`); the live `default` session was unchanged throughout |
@@ -139,7 +139,8 @@ The tmux adapter classifies the anchored process name `agy` as `agent` through t
 
 Byte-level capture of the idle pane shows a leading `>` row between two full-width `─` rules, with an unstyled `? for shortcuts` cell and a dim (`SGR 2`) model cell in the status row below; when one or more background `run_command` tasks are active, `agy` renders a `─`-bounded task tray (`  ● [HH:MM:SS] <cmd> running`) immediately below the composer's bottom `─` rule and above `? for shortcuts` (verified live on `agy 1.4.5`).
 Because a bare `>` row is a shell prompt glyph under the dead-shell rule, `bin/fm-composer-lib.sh` classifies `agy`'s composer through the shared separated-pair identity+structure conjunction (`_fm_composer_pi_verdict`, backed by Herdr's `agent get` and `fm_tmux_composer_identity` in `bin/fm-tmux-lib.sh`): an `agy` identity with a valid `>`-led separator pair (preserving that pair above any immediately adjacent `● [HH:MM:SS] ... running` task-tray block) reads `empty` when `idle` or `done` with no text after `>`, `pending` when draft text follows `>` or continues on wrapped rows inside the pair, and `unknown` when `working` or when identity or the separator pair is absent.
-This allows `fm-watch.sh`'s away-mode injector and `fm-task-inbox.sh`'s steering doorbell to prove an idle `agy` primary, secondmate, or worker composer `empty` (with or without active background tasks) while refusing dead shells and bare `>` prompts.
+This allows `fm-watch.sh`'s away-mode injector and `fm-task-inbox.sh`'s steering doorbell to prove an idle `agy` primary, secondmate, or worker composer `empty` (with or without active background tasks) while refusing dead shells, bare `>` prompts, and half-typed drafts (`pending`).
+Because `agy` exposes no out-of-band composer-buffer RPC, reading the `─`-bounded `>` composer row and `● [HH:MM:SS] <cmd> running` background-task tray from the rendered pane is recorded as pinned rendered-surface adapter debt against `agy 1.4.5`.
 Steering also confirms delivery through the native `idle`-to-`working` transition on Herdr and the delivery footer regex on tmux.
 agy renders the busy footer late for that confirm loop - about 1.5 s after Enter for a short steer and 4-5 s for a realistic longer brief, measured live on `agy 1.2.1` (2026-09-12) against the shared budget's 3 x 0.4 s - so `bin/fm-send.sh` gives agy typed targets a longer default submit-confirm budget (20 retries, about 8 s at the default cadence); an explicit `FM_SEND_RETRIES` still wins and every other harness keeps the shared 3-retry default.
 `tests/fm-send-agy-confirm.test.sh` pins the raised default and `tests/fm-agy-harness.test.sh` and `tests/fm-composer-lib.test.sh` pin the separated composer classification and Herdr transition path.
@@ -177,7 +178,6 @@ Hermetic regression coverage lives in `tests/fm-agy-primary.test.sh`.
 The unauthenticated failure mode was never observed; this host's agy runs signed in, so any auth prompt is a fail-loud credential blocker, not a handled dialog.
 No slash-skill invocation form was verified, so skill invocation stays natural language.
 `--continue` and `--conversation` resume were never exercised; recovery uses deterministic relaunch from the brief on disk.
-Secondmate deployment using agy remains unverified.
 
 ## Refreshing this record
 
