@@ -303,7 +303,6 @@ The registrations in detail:
   The stand-down fails toward running, matching the guards above, so no payload, no `jq`, or no `transcript_path` still arms, and every other Claude-shaped hook pi-code delivers keeps running.
 - Antigravity CLI (agy) registers a `Stop` hook in `.agents/hooks.json` and delegates the turn boundary to `bin/fm-turnend-guard-agy.sh` as a fast non-blocking backstop for its background-notify supervision model (`docs/supervision-protocols/agy.md`).
   When a healthy watcher cycle is already running as an Antigravity tracked background `run_command` task, the hook returns `{"decision": "allow"}` immediately.
-  When unread wakes are queued in `state/.wake-queue` at turn end, it returns `{"decision": "continue", "reason": "..."}` so the session drains them before stopping.
   When active tasks are in flight with no healthy watcher cycle, it queries this shared guard with `--agy` and returns a bounded `continue` decision with the repair instructions, capped by `FM_AGY_TURNEND_BLOCK_BUDGET` (default 3) consecutive unproductive blocks before allowing the stop.
   `FM_AGY_TURNEND_LOOP_CEILING` (default 180) bounds consecutive hook-driven turns.
 

@@ -1,4 +1,4 @@
-# Verification: the agy (Antigravity CLI) crewmate/scout adapter
+# Verification: the agy (Antigravity CLI) adapter
 
 Active empirical facts for firstmate's agy adapter.
 The skill tree rooted at [`.agents/skills/harness-adapters/SKILL.md`](../../.agents/skills/harness-adapters/SKILL.md) owns the operating facts through [`references/harness/agy.md`](../../.agents/skills/harness-adapters/references/harness/agy.md); this record owns how they were established and what is still unproven.
