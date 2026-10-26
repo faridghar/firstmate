@@ -111,7 +111,14 @@ fm_pid_identity() {
   # narrow-COLUMNS hook, where a truncated command would likewise reject a live
   # watcher (issue #799). This mirrors fm_pending_reply_pid_identity, which pins the
   # same width for the same reason.
-  out=$(COLUMNS=10000 LC_ALL=C ps -p "$pid" -o lstart= -o command= 2>/dev/null) || return 1
+  # Pin TZ=UTC0 because lstart renders in local time: a supervision engine whose
+  # launcher exports another TZ than the host's hooks would otherwise read the
+  # host's grant owner as dead, discard the grant, and refuse its drain.
+  # bin/fm-extension.mjs's pidIdentity pins the same zone. On a /proc-less host
+  # outside UTC, an identity recorded before this pin may read as reused for one
+  # upgrade window; this is an accepted bounded upgrade-window residual that the
+  # restart /updatefirstmate performs after a successful update clears.
+  out=$(COLUMNS=10000 LC_ALL=C TZ=UTC0 ps -p "$pid" -o lstart= -o command= 2>/dev/null) || return 1
   [ -n "$out" ] || return 1
   printf '%s\n' "$out" | sed 's/^[[:space:]]*//'
 }
@@ -352,6 +359,23 @@ fm_extension_pair_owns_supervision() {  # <state> <extension-dir> <source:marker
     fm_pi_extension_loaded "$state/$marker" "$version" "$lock" "$phase" || return 1
   done
   session_pid=$(sed -n '1p' "$lock" 2>/dev/null)
+  # A Windows-tagged holder is outside this process table, so kill -0 cannot
+  # see it. Only a win:-shaped value loads the session-lock library, so a POSIX
+  # home's verdict stays exactly the local liveness test below.
+  case "$session_pid" in
+    win:*)
+      if ! command -v fm_harness_pid_alive >/dev/null 2>&1; then
+        # An analysis boundary, as in fm-lease-lib.sh: the session-lock library
+        # is linted in its own right, and following it here would re-analyze it
+        # for every consumer of this widely sourced library.
+        # shellcheck source=/dev/null
+        . "$FM_WAKE_LIB_DIR/fm-session-lock-lib.sh"
+      fi
+      fm_session_pid_valid "$session_pid" || return 1
+      fm_harness_pid_alive "$session_pid"
+      return
+      ;;
+  esac
   fm_pid_alive "$session_pid"
 }
 
@@ -1318,9 +1342,31 @@ fm_lock_try_acquire() {
   return "$rc"
 }
 
+# A lock is created inside its parent directory, so once that directory is gone
+# (a removed home, state directory, or temporary test root) no retry can ever
+# succeed. Succeeds only when the parent is still missing after a 0.1s recheck,
+# so a directory being renamed into place is not mistaken for a removal.
+fm_lock_parent_gone() {  # <lockdir>
+  local parent
+  case "$1" in
+    */*) parent=${1%/*} ;;
+    *) parent=. ;;
+  esac
+  [ -n "$parent" ] || parent=/
+  [ -d "$parent" ] && return 1
+  sleep 0.1
+  [ ! -d "$parent" ]
+}
+
+# Wait for a lock. The 0.1s retry serves live contention on short critical
+# sections, where a wider interval would delay every handoff between the
+# watcher and its writers. The wait is unbounded only while the lock can still
+# be taken: it returns 1 within 0.2s of its parent directory's removal
+# (fm_lock_parent_gone) instead of polling for a lock that can never exist.
 fm_lock_acquire_wait() {
   local lockdir=$1
   while ! fm_lock_try_acquire "$lockdir"; do
+    ! fm_lock_parent_gone "$lockdir" || return 1
     sleep 0.1
   done
 }
@@ -2317,7 +2363,19 @@ fm_wake_append_locked() {
     case "$seq" in
       ''|*[!0-9]*) seq=0 ;;
     esac
-    seq=$((seq + 1))
+    # A lost or unreadable counter must not reuse a queued row's sequence: an
+    # outstanding sequence-bound acknowledgement would consume the new row.
+    # Compare and print the decimal text, never an awk number: awk floats lose
+    # exactness and may format large values in scientific notation.
+    seq=$(awk -F '\t' -v n="$seq" '
+      function digits(v) { sub(/^0+/, "", v); return v }
+      NF >= 5 && $2 ~ /^[0-9]+$/ {
+        a = digits($2); b = digits(n)
+        if (length(a) > length(b) || (length(a) == length(b) && ("" a) > ("" b))) n = $2
+      }
+      END { print n }
+    ' "$FM_WAKE_QUEUE" 2>/dev/null || printf '%s\n' "$seq")
+    seq=$((10#$seq + 1))
     printf '%s\n' "$seq" > "$seq_file" || status=$?
   fi
   if [ "$status" -eq 0 ]; then
