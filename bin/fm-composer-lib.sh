@@ -1205,14 +1205,20 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap] 
             fi
           fi
           ;;
-        *) valid=0 ;;
+        *)
+          if [ -n "$cy" ] && [ "$top" -lt "$cy" ] && [ "$cy" -le "$row" ]; then
+            FM_COMPOSER_SCAN_UNSAFE=1
+          fi
+          top=-1
+          valid=0
+          ;;
       esac
     fi
     row=$((row + 1))
   done <<EOF
 $pane
 EOF
-  if [ -n "$cy" ] && [ "$top" -ge 0 ] && [ "$top" -lt "$cy" ]; then
+  if [ -n "$cy" ] && [ "$top" -ge 0 ] && [ "$top" -lt "$cy" ] && [ "$valid" = 1 ]; then
     FM_COMPOSER_SCAN_UNSAFE=1
   fi
 }
@@ -1928,10 +1934,6 @@ _fm_composer_select_cursorless() {
     FM_COMPOSER_SELECTED_FIRST=$FM_COMPOSER_SCAN_LEFTBAR_START
     FM_COMPOSER_SELECTED_LAST=$FM_COMPOSER_SCAN_LEFTBAR_END
   fi
-  if [ "$FM_COMPOSER_SCAN_INCOMPLETE_BOX_FROM" -gt "$generic" ]; then
-    FM_COMPOSER_SELECTED_KIND=
-    return 1
-  fi
   if [ "$FM_COMPOSER_SCAN_PI_PAIR_FOUND" = 1 ] \
      && [ "$FM_COMPOSER_SCAN_PI_CLOSE" -gt "$generic" ] \
      && [ "$generic" -lt "$FM_COMPOSER_SCAN_PI_OPEN" ]; then
@@ -1939,6 +1941,10 @@ _fm_composer_select_cursorless() {
     FM_COMPOSER_SELECTED_KIND=pi
     FM_COMPOSER_SELECTED_FIRST=$((FM_COMPOSER_SCAN_PI_OPEN + 1))
     FM_COMPOSER_SELECTED_LAST=$((FM_COMPOSER_SCAN_PI_CLOSE - 1))
+  fi
+  if [ "$FM_COMPOSER_SCAN_INCOMPLETE_BOX_FROM" -gt "$generic" ]; then
+    FM_COMPOSER_SELECTED_KIND=
+    return 1
   fi
   if [ "$FM_COMPOSER_SCAN_PI_PAIR_FOUND" = 0 ] \
      && [ "$FM_COMPOSER_SCAN_PI_LAST_SEPARATOR" -gt "$generic" ]; then

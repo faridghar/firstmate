@@ -712,7 +712,7 @@ test_matrix_agy_separated_composer_and_task_tray() {
   # background-task tray above `? for shortcuts`. Like Pi and Polytoken, the
   # shape requires identity + structure, and for agy the first row inside the
   # composer pair must lead with `>`.
-  local idle idle_tray typed typed_tray blank_pair bare_gt out
+  local idle idle_tray typed typed_tray blank_pair bare_gt idle_diagram out
   local agy_idle agy_done agy_working pi_idle none
   agy_idle=$(printf 'agy\tidle')
   agy_done=$(printf 'agy\tdone')
@@ -720,6 +720,7 @@ test_matrix_agy_separated_composer_and_task_tray() {
   pi_idle=$(printf 'pi\tidle')
   none=$(printf 'zsh\t')
   idle=$'● Reply landed\n────────────────────────\n> \n────────────────────────\n  ? for shortcuts                                        Gemini 4 Argon · high'
+  idle_diagram=$'┌────────────────────────┐\n│ SYSTEM 1: Reflex       │\n└───────────┬────────────┘\n            │\n┌───────────┴────────────┐\n▼                        ▼\n● Reply landed\n────────────────────────\n> \n────────────────────────\n  ? for shortcuts                                        Gemini 4 Argon · high'
   idle_tray=$'● Reply landed\n────────────────────────\n> \n────────────────────────\n  ● [09:03:38] bin/fm-watch-arm.sh running\n  ● [18:31:18] cloud-sql-proxy --port 5432 running\n────────────────────────\n  ? for shortcuts                        Gemini 4 Argon · high · 2 task(s) · /tasks'
   typed=$'● Reply landed\n────────────────────────\n> fix the flaky test\n────────────────────────\n  ? for shortcuts                                        Gemini 4 Argon · high'
   typed_tray=$'● Reply landed\n────────────────────────\n> fix the flaky test\nand update the docs\n────────────────────────\n  ● [09:03:38] bin/fm-watch-arm.sh running\n────────────────────────\n  ? for shortcuts                        Gemini 4 Argon · high · 1 task(s) · /tasks'
@@ -729,6 +730,8 @@ test_matrix_agy_separated_composer_and_task_tray() {
   assert_screen "agy idle with identity on herdr" empty "$CAPS_STYLED" "$idle" '' "$agy_idle"
   assert_screen "agy done with identity on herdr" empty "$CAPS_STYLED" "$idle" '' "$agy_done"
   assert_screen "agy idle with identity on tmux" empty "$CAPS_TMUX" "$idle" 2 "$agy_idle"
+  assert_screen "agy idle with higher incomplete diagram on herdr" empty "$CAPS_STYLED" "$idle_diagram" '' "$agy_idle"
+  assert_screen "agy idle with higher incomplete diagram on tmux" empty "$CAPS_TMUX" "$idle_diagram" 8 "$agy_idle"
   assert_screen "agy idle with background-task tray on herdr" empty "$CAPS_STYLED" "$idle_tray" '' "$agy_idle"
   assert_screen "agy idle with background-task tray on tmux" empty "$CAPS_TMUX" "$idle_tray" 2 "$agy_idle"
   assert_screen "agy working defers" unknown "$CAPS_STYLED" "$idle" '' "$agy_working"
