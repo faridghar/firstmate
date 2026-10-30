@@ -1963,33 +1963,47 @@ cleanup_stale_lock_for_safety_check() {
 cleanup_worktree_agents_hooks() {  # <wt>
   local wt=$1 hooks other_keys tmp_hooks head_hooks
   [ -d "$wt" ] || return 0
+  # Clean up isolated agy plugin wiring if present
+  if [ -d "$wt/.agents/plugins/fm-crew-busy" ]; then
+    rm -rf "$wt/.agents/plugins/fm-crew-busy"
+    rmdir "$wt/.agents/plugins" 2>/dev/null || true
+    rmdir "$wt/.agents" 2>/dev/null || true
+  fi
   hooks="$wt/.agents/hooks.json"
   if [ -f "$hooks" ]; then
-    if command -v jq >/dev/null 2>&1; then
-      tmp_hooks="$hooks.tmp.$$"
-      if jq 'del(."fm-crew-busy")' "$hooks" > "$tmp_hooks" 2>/dev/null; then
-        mv -f "$tmp_hooks" "$hooks"
-      else
-        rm -f "$tmp_hooks"
-      fi
+    if ! command -v jq >/dev/null 2>&1; then
+      echo "warning: jq is missing; preserving $hooks without cleanup" >&2
+      return 1
+    fi
+    if ! jq -e . "$hooks" >/dev/null 2>&1; then
+      echo "warning: $hooks contains invalid JSON; preserving file without cleanup" >&2
+      return 1
+    fi
+    tmp_hooks="$hooks.tmp.$$"
+    if jq 'del(."fm-crew-busy")' "$hooks" > "$tmp_hooks" 2>/dev/null; then
+      mv -f "$tmp_hooks" "$hooks"
+    else
+      rm -f "$tmp_hooks"
     fi
     if git -C "$wt" ls-files --error-unmatch .agents/hooks.json >/dev/null 2>&1; then
       git -C "$wt" update-index --no-skip-worktree .agents/hooks.json 2>/dev/null || true
       head_hooks=$(git -C "$wt" show HEAD:.agents/hooks.json 2>/dev/null || true)
-      if [ -n "$head_hooks" ] && command -v jq >/dev/null 2>&1 && \
+      if [ -n "$head_hooks" ] && \
          jq -e -n --arg a "$head_hooks" --arg b "$(cat "$hooks")" '($a | fromjson) == ($b | fromjson)' >/dev/null 2>&1; then
         git -C "$wt" checkout -- .agents/hooks.json 2>/dev/null || true
       fi
     else
-      if command -v jq >/dev/null 2>&1; then
-        other_keys=$(jq 'keys | length' "$hooks" 2>/dev/null || echo 0)
-        case "$other_keys" in ''|*[!0-9]*) other_keys=0 ;; esac
-        if [ "$other_keys" -eq 0 ]; then
+      other_keys=$(jq 'keys | length' "$hooks" 2>/dev/null) || other_keys=""
+      case "$other_keys" in
+        ''|*[!0-9]*)
+          echo "warning: could not determine keys in $hooks; preserving file" >&2
+          return 1
+          ;;
+        0)
           rm -f "$hooks"
-        fi
-      else
-        rm -f "$hooks"
-      fi
+          rmdir "$wt/.agents" 2>/dev/null || true
+          ;;
+      esac
     fi
   fi
 }

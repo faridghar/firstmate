@@ -959,8 +959,9 @@ test_agy_hooks_semantic_lifecycle() {
   out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR")
   expect_code 0 $? "agy spawn should succeed: $out"
   state="$HOME_DIR/state"
-  hooks="$WT_DIR/.agents/hooks.json"
-  assert_present "$hooks" "agy spawn did not write hooks.json"
+  hooks="$WT_DIR/.agents/plugins/fm-crew-busy/hooks.json"
+  assert_present "$hooks" "agy spawn did not write hooks.json in plugin dir"
+  assert_present "$WT_DIR/.agents/plugins/fm-crew-busy/plugin.json" "agy spawn did not write plugin.json"
   jq -e . "$hooks" >/dev/null || fail "agy hook settings are not valid JSON"
   for ev in PreInvocation Stop; do
     jq -e ".\"fm-crew-busy\"[\"$ev\"]" "$hooks" >/dev/null || fail "agy hook settings lack $ev"
@@ -1002,7 +1003,7 @@ test_agy_hooks_stale_incarnation_harmless() {
   out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR")
   expect_code 0 $? "agy spawn should succeed: $out"
   state="$HOME_DIR/state"
-  hooks="$WT_DIR/.agents/hooks.json"
+  hooks="$WT_DIR/.agents/plugins/fm-crew-busy/hooks.json"
   "$ROOT/bin/fm-busy-event.sh" arm "$state" "$id" >/dev/null
   run_agy_hook "$hooks" Stop >/dev/null \
     || fail "a stale-gen hook must still exit 0 so agy's lifecycle is never broken"

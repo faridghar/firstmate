@@ -251,42 +251,6 @@ $WAKE
 Run bin/fm-wake-drain.sh first, handle the wake, then run its exact WAKE_ACK_REQUIRED --ack-through command. Until that post-handling acknowledgement, interruption leaves the wake durable for idempotent re-handling. If the home still needs supervision after handling, re-arm bin/fm-watch-arm.sh as its own Antigravity tracked background run_command task (WaitMsBeforeAsync: 1000)." reset-budget
 fi
 
-# Active task predicate: an in-flight task requires supervision unless it has
-# already been recorded as an open PR awaiting external review/merge (pr= in meta)
-# with an idle worker. Tasks that have not yet had their PR registered or that
-# use local-only branches require supervision for landing, teardown, or recovery.
-fm_has_active_tasks() {
-  local state=$1 meta id b_state
-  for meta in "$state"/*.meta; do
-    [ -e "$meta" ] || continue
-    id=$(basename "$meta" .meta)
-
-    # Any pending turn-ended notification for this task requires immediate supervision.
-    [ -f "$state/$id.turn-ended" ] && return 0
-
-    # If the task has not yet been registered as an open PR (bin/fm-pr-check.sh),
-    # it is actively executing or awaiting landing/teardown/reporting.
-    if ! grep -q '^pr=' "$meta" 2>/dev/null; then
-      return 0
-    fi
-
-    # For PR-registered tasks: if the worker is still actively executing,
-    # it is still an active task.
-    if [ -f "$state/$id.busy-state" ]; then
-      b_state=$(sed -n 's/.*state=\([a-z]*\).*/\1/p' "$state/$id.busy-state" 2>/dev/null || true)
-      [ "$b_state" = "busy" ] && return 0
-    fi
-  done
-  return 1
-}
-
-# Antigravity CLI supervision requires active in-flight work, pending wakes, or active Relay watch.
-# Background checks (e.g. contributions poll, PR merge polls) and PR-registered idle tasks
-# do not require an active background watcher task.
-if { [ "$FM_SUP_IN_FLIGHT" -eq 0 ] || ! fm_has_active_tasks "$STATE"; } && [ ! -f "$STATE/x-watch.check.sh" ]; then
-  budget_reset_if_ours
-  emit_allow
-fi
 
 # Normal Option A path: a verified live watcher cycle with a fresh beacon
 # (armed via Antigravity's tracked background run_command tool) allows the turn

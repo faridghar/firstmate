@@ -2007,9 +2007,11 @@ _fm_composer_select_cursorless() {
   [ -n "$FM_COMPOSER_SELECTED_KIND" ]
 }
 
-fm_composer_extract_selected_content() {  # <caps> <screen>
-  local caps=$1 screen=$2 styled=0 kv plain row raw content glyph joined='' footer_re prompt_row=-1
+fm_composer_extract_selected_content() {  # <caps> <screen> [identity]
+  local caps=$1 screen=$2 identity=${3:-}
+  local styled=0 kv plain row raw content glyph joined='' footer_re prompt_row=-1
   local leading_blank=1 placeholder_position=0 prompt_is_shell=0 cwd_start
+  local agent=${identity%%$'\t'*}
   footer_re=${FM_COMPOSER_LEFTBAR_FOOTER_RE:-$FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT}
   while IFS= read -r kv; do
     [ "$kv" = styled=1 ] && styled=1
@@ -2037,7 +2039,7 @@ EOF
         fi
         ;;
       pi)
-        if [ "$row" -eq "$FM_COMPOSER_SELECTED_FIRST" ] \
+        if [ "$agent" = agy ] && [ "$row" -eq "$FM_COMPOSER_SELECTED_FIRST" ] \
            && [ "$FM_COMPOSER_SCAN_PI_FIRST_GT" = 1 ]; then
           case "$content" in
             '>'*) content=${content#>} ;;

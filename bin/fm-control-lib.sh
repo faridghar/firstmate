@@ -547,7 +547,10 @@ fm_control_harness_wiring_paths() {  # <harness> <worktree> <state-dir> <id> [ki
     # the project, and nothing global is installed.
     gemini) printf '%s\n' "$state/$id.gemini-settings.json" ;;
     devin) printf '%s\n' "$state/$id.devin-config.json" ;;
-    agy) printf '%s\n' "$wt/.agents/hooks.json" ;;
+    agy)
+      printf '%s\n' "$wt/.agents/plugins/fm-crew-busy/hooks.json"
+      printf '%s\n' "$wt/.agents/plugins/fm-crew-busy/plugin.json"
+      ;;
     # cortex's lifecycle hooks live in a firstmate-owned plugin directory the
     # launch reaches through --plugin-dir. Only its two files are retired here
     # (this table's consumer removes files); teardown removes the directory.
@@ -648,32 +651,51 @@ fm_control_clear_harness_wiring() {  # <harness> <worktree> <state-dir> <id> [ki
         "$wt"/*) git -C "$wt" ls-files --error-unmatch -- "$path" >/dev/null 2>&1 && continue ;;
       esac
     fi
-    if [ "$harness" = agy ] && [ "$path" = "$wt/.agents/hooks.json" ] && [ -f "$path" ] && command -v jq >/dev/null 2>&1; then
-      tmp_hooks="$path.tmp.$$"
-      if jq 'del(."fm-crew-busy")' "$path" > "$tmp_hooks" 2>/dev/null; then
-        mv -f "$tmp_hooks" "$path"
-      else
-        rm -f "$tmp_hooks"
-      fi
-      if git -C "$wt" ls-files --error-unmatch .agents/hooks.json >/dev/null 2>&1; then
-        git -C "$wt" update-index --no-skip-worktree .agents/hooks.json 2>/dev/null || true
-        head_hooks=$(git -C "$wt" show HEAD:.agents/hooks.json 2>/dev/null || true)
-        if [ -n "$head_hooks" ] && jq -e -n --arg a "$head_hooks" --arg b "$(cat "$path")" '($a | fromjson) == ($b | fromjson)' >/dev/null 2>&1; then
-          git -C "$wt" checkout -- .agents/hooks.json 2>/dev/null || true
-        fi
-      else
-        other_keys=$(jq 'keys | length' "$path" 2>/dev/null || echo 0)
-        case "$other_keys" in ''|*[!0-9]*) other_keys=0 ;; esac
-        if [ "$other_keys" -eq 0 ]; then
+    if [ "$harness" = agy ]; then
+      case "$path" in
+        "$wt/.agents/plugins/fm-crew-busy"/*)
           rm -f -- "$path" || return 1
-        fi
-      fi
-      continue
+          continue
+          ;;
+        "$wt/.agents/hooks.json")
+          if [ -f "$path" ]; then
+            if ! command -v jq >/dev/null 2>&1 || ! jq -e . "$path" >/dev/null 2>&1; then
+              echo "warning: jq missing or invalid JSON in $path; preserving file" >&2
+              return 1
+            fi
+            tmp_hooks="$path.tmp.$$"
+            if jq 'del(."fm-crew-busy")' "$path" > "$tmp_hooks" 2>/dev/null; then
+              mv -f "$tmp_hooks" "$path"
+            else
+              rm -f "$tmp_hooks"
+            fi
+            if git -C "$wt" ls-files --error-unmatch .agents/hooks.json >/dev/null 2>&1; then
+              git -C "$wt" update-index --no-skip-worktree .agents/hooks.json 2>/dev/null || true
+              head_hooks=$(git -C "$wt" show HEAD:.agents/hooks.json 2>/dev/null || true)
+              if [ -n "$head_hooks" ] && jq -e -n --arg a "$head_hooks" --arg b "$(cat "$path")" '($a | fromjson) == ($b | fromjson)' >/dev/null 2>&1; then
+                git -C "$wt" checkout -- .agents/hooks.json 2>/dev/null || true
+              fi
+            else
+              other_keys=$(jq 'keys | length' "$path" 2>/dev/null) || other_keys=""
+              case "$other_keys" in
+                ''|*[!0-9]*) return 1 ;;
+                0) rm -f -- "$path" || return 1 ;;
+              esac
+            fi
+          fi
+          continue
+          ;;
+      esac
     fi
     rm -f -- "$path" || return 1
   done <<EOF
 $(fm_control_harness_wiring_paths "$harness" "$wt" "$state" "$id" "$kind")
 EOF
+  if [ "$harness" = agy ] && [ -n "$wt" ]; then
+    rmdir "$wt/.agents/plugins/fm-crew-busy" 2>/dev/null || true
+    rmdir "$wt/.agents/plugins" 2>/dev/null || true
+    rmdir "$wt/.agents" 2>/dev/null || true
+  fi
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     rm -rf -- "$path" || return 1

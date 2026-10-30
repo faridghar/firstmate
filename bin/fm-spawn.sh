@@ -5994,7 +5994,12 @@ BUSY_GEN=
     # the watcher. Every hook command tolerates a refused event (|| true) so a
     # stale-gen writer can never break agy's own lifecycle, and prints the
     # JSON object agy's hook contract requires on stdout.
-    mkdir -p "$WT/.agents"
+    # To keep firstmate's hooks separate from any project-tracked .agents/hooks.json,
+    # the hooks are placed in a dedicated, untracked plugin at
+    # .agents/plugins/fm-crew-busy/. Antigravity CLI automatically discovers and
+    # ingests plugins in .agents/plugins/.
+    plugin_dir="$WT/.agents/plugins/fm-crew-busy"
+    mkdir -p "$plugin_dir"
     busy_cmd_prefix="$(shell_quote "$FM_ROOT/bin/fm-busy-event.sh") apply $(shell_quote "$STATE_REAL") $(shell_quote "$ID")"
     busy_suffix="--gen $(shell_quote "$BUSY_GEN") --source agy-hook"
     a_preinv="$busy_cmd_prefix busy $busy_suffix --event pre-invocation >/dev/null 2>&1 || true; printf '{}'"
@@ -6003,25 +6008,13 @@ BUSY_GEN=
       stop_turnend="touch $(shell_quote "$TURNEND"); "
     fi
     a_stop="${stop_turnend}$busy_cmd_prefix idle $busy_suffix --event stop >/dev/null 2>&1 || true; printf '{\"decision\":\"allow\"}\\n'"
-    hooks_file="$WT/.agents/hooks.json"
-    if [ -f "$hooks_file" ] && command -v jq >/dev/null 2>&1; then
-      tmp_hooks="$hooks_file.tmp.$$"
-      if jq --arg preinv "$a_preinv" --arg stop "$a_stop" \
-        '. + {"fm-crew-busy":{"PreInvocation":[{"type":"command","command":$preinv}],"Stop":[{"type":"command","command":$stop}]}}' \
-        "$hooks_file" > "$tmp_hooks" 2>/dev/null; then
-        mv -f "$tmp_hooks" "$hooks_file"
-      else
-        rm -f "$tmp_hooks"
-      fi
-    else
-      cat >"$hooks_file" <<EOF
+    cat >"$plugin_dir/plugin.json" <<EOF
+{"name":"fm-crew-busy"}
+EOF
+    cat >"$plugin_dir/hooks.json" <<EOF
 {"fm-crew-busy":{"PreInvocation":[{"type":"command","command":"$(json_escape "$a_preinv")"}],"Stop":[{"type":"command","command":"$(json_escape "$a_stop")"}]}}
 EOF
-    fi
-    exclude_path '.agents/hooks.json'
-    if git -C "$WT" ls-files --error-unmatch .agents/hooks.json >/dev/null 2>&1; then
-      git -C "$WT" update-index --skip-worktree .agents/hooks.json 2>/dev/null || true
-    fi
+    exclude_path '.agents/plugins/fm-crew-busy/'
     ;;
   devin)
     if [ "$RAW_LAUNCH" -eq 0 ]; then

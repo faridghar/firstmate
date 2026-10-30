@@ -745,9 +745,16 @@ test_matrix_agy_separated_composer_and_task_tray() {
   assert_screen "agy typed on tmux" pending "$CAPS_TMUX" "$typed" 2 "$agy_idle"
   assert_screen "agy typed with background-task tray on herdr" pending "$CAPS_STYLED" "$typed_tray" '' "$agy_idle"
   assert_screen "agy typed with background-task tray on tmux" pending "$CAPS_TMUX" "$typed_tray" 2 "$agy_idle"
-  out=$(fm_composer_extract_selected_content "$CAPS_STYLED" "$typed_tray")
+  out=$(fm_composer_extract_selected_content "$CAPS_STYLED" "$typed_tray" "$agy_idle")
   [ "$out" = 'fix the flaky test and update the docs' ] \
     || fail "agy extraction with task tray must strip leading > and exclude tray rows, got '$out'"
+  local pi_typed=$'● Reply landed\n────────────────────────\n> quoted text\n────────────────────────\n  ? for shortcuts'
+  out=$(fm_composer_extract_selected_content "$CAPS_STYLED" "$pi_typed" "$pi_idle")
+  [ "$out" = '> quoted text' ] \
+    || fail "pi extraction with leading > must preserve user > quoted text, got '$out'"
+  out=$(fm_composer_extract_selected_content "$CAPS_STYLED" "$pi_typed")
+  [ "$out" = '> quoted text' ] \
+    || fail "unspecified identity extraction must preserve leading > for non-agy, got '$out'"
   pass "matrix: agy's >-led separated composer (with or without background-task tray) classifies via identity + structure"
 }
 

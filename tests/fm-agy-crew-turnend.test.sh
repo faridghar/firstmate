@@ -53,13 +53,15 @@ test_agy_crew_spawn_installs_hooks_and_turnend_notifies() {
 
   state="$HOME_DIR/state"
   assert_present "$state/$id.busy-gen" "agy spawn did not mint busy-gen"
-  hooks="$WT_DIR/.agents/hooks.json"
-  assert_present "$hooks" "agy spawn did not create .agents/hooks.json"
+  local plugin_dir="$WT_DIR/.agents/plugins/fm-crew-busy"
+  hooks="$plugin_dir/hooks.json"
+  assert_present "$hooks" "agy spawn did not create plugin hooks.json"
+  assert_present "$plugin_dir/plugin.json" "agy spawn did not create plugin.json"
 
   # Excluded from git
   excl=$(cd "$WT_DIR" && git rev-parse --git-path info/exclude)
   [ -f "$excl" ] || fail "git exclude file '$excl' does not exist"
-  grep -qxF '.agents/hooks.json' "$excl" || fail ".agents/hooks.json was not added to git exclude: $(cat "$excl")"
+  grep -qxF '.agents/plugins/fm-crew-busy/' "$excl" || fail ".agents/plugins/fm-crew-busy/ was not added to git exclude: $(cat "$excl")"
 
   jq -e '."fm-crew-busy".Stop' "$hooks" >/dev/null || fail "missing Stop hook"
   jq -e '."fm-crew-busy".PreInvocation' "$hooks" >/dev/null || fail "missing PreInvocation hook"
@@ -93,7 +95,7 @@ test_agy_crew_spawn_installs_hooks_and_turnend_notifies() {
   pass "agy crewmate: spawn installs hooks, Stop hook touches turn-ended and classifies idle, PreInvocation turns busy"
 }
 
-test_agy_crew_spawn_merges_with_existing_hooks() {
+test_agy_crew_spawn_preserves_existing_project_hooks() {
   local rec id=crew-merge-1 out state hooks
   rec=$(make_case merge-hooks "$id")
   read_case "$rec"
@@ -121,19 +123,27 @@ EOF
   out=$(fm_test_run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR" --mode no-mistakes --yolo off)
   expect_code 0 $? "spawn into tree with existing hooks should succeed: $out"
 
+  # Pre-existing project hooks are completely untouched
   hooks="$WT_DIR/.agents/hooks.json"
   jq -e '."project-linter".PreToolUse' "$hooks" >/dev/null \
     || fail "spawn clobbered pre-existing project-linter hook"
-  jq -e '."fm-crew-busy".Stop' "$hooks" >/dev/null \
-    || fail "spawn did not add fm-crew-busy Stop hook"
+  if jq -e '."fm-crew-busy"' "$hooks" >/dev/null 2>&1; then
+    fail "spawn must not inject fm-crew-busy into project's .agents/hooks.json"
+  fi
 
-  # Assert skip-worktree is active so tracked hooks.json is not visible to git status
+  # Tracked .agents/hooks.json is NEVER set to skip-worktree (normal status H)
   ls_flags=$(git -C "$WT_DIR" ls-files -v .agents/hooks.json | awk '{print $1}')
-  [ "$ls_flags" = "S" ] || fail "tracked .agents/hooks.json must have skip-worktree set (S), got '$ls_flags'"
+  [ "$ls_flags" = "H" ] || fail "tracked .agents/hooks.json must keep normal status (H), got '$ls_flags'"
   dirty_status=$(git -C "$WT_DIR" status --porcelain .agents/hooks.json)
   [ -z "$dirty_status" ] || fail "tracked .agents/hooks.json must be clean in git status, got '$dirty_status'"
 
-  pass "agy crewmate: spawn merges fm-crew-busy without clobbering pre-existing hooks"
+  # fm-crew-busy is isolated in its own plugin
+  local plugin_hooks="$WT_DIR/.agents/plugins/fm-crew-busy/hooks.json"
+  assert_present "$plugin_hooks" "isolated plugin hooks.json missing"
+  jq -e '."fm-crew-busy".Stop' "$plugin_hooks" >/dev/null \
+    || fail "isolated plugin lacks fm-crew-busy Stop hook"
+
+  pass "agy crewmate: spawn keeps project hooks untouched and isolates fm-crew-busy in plugin"
 }
 
 test_agy_crew_wiring_cleanup_preserves_other_hooks() {
@@ -165,17 +175,14 @@ EOF
 
   assert_present "$hooks" "hooks.json should still exist because custom-hook was present"
   jq -e '."custom-hook"' "$hooks" >/dev/null || fail "custom-hook was accidentally deleted"
-  if jq -e '."fm-crew-busy"' "$hooks" >/dev/null 2>&1; then
-    fail "fm-crew-busy was not pruned from hooks.json"
-  fi
+  [ ! -d "$WT_DIR/.agents/plugins/fm-crew-busy" ] || fail "plugin directory was not cleaned up"
 
-  # Assert no-skip-worktree is restored and worktree is clean
   ls_flags=$(git -C "$WT_DIR" ls-files -v .agents/hooks.json | awk '{print $1}')
   [ "$ls_flags" = "H" ] || fail "tracked .agents/hooks.json must have normal status (H) after cleanup, got '$ls_flags'"
   dirty_status=$(git -C "$WT_DIR" status --porcelain .agents/hooks.json)
   [ -z "$dirty_status" ] || fail "tracked .agents/hooks.json must be clean in git status after cleanup, got '$dirty_status'"
 
-  pass "agy crewmate: wiring cleanup prunes fm-crew-busy while preserving existing project hooks"
+  pass "agy crewmate: wiring cleanup removes plugin while preserving existing project hooks"
 }
 
 test_agy_secondmate_spawn_and_trust() {
@@ -235,35 +242,50 @@ EOF
   jq '. + {"worker-hook":{"Stop":[{"type":"command","command":"echo worker"}]}}' "$hooks" > "$tmp_edit"
   mv -f "$tmp_edit" "$hooks"
 
+  # git status must IMMEDIATELY report .agents/hooks.json without waiting for teardown!
+  dirty_status=$(git -C "$WT_DIR" status --porcelain)
+  assert_contains "$dirty_status" ".agents/hooks.json" "git status must immediately report .agents/hooks.json as dirty"
+
   # Teardown without --force MUST refuse loudly because of uncommitted changes
   teardown_out=$(FM_HOME="$HOME_DIR" "$ROOT/bin/fm-teardown.sh" "$id" 2>&1)
   expect_code 1 $? "teardown must refuse when worker has uncommitted edits to hooks.json"
   assert_contains "$teardown_out" "REFUSED: worktree" "refusal message missing REFUSED: worktree"
   assert_contains "$teardown_out" "uncommitted changes present (includes tracked edits)" "refusal message missing tracked edits notice"
 
-  # git status must clearly report .agents/hooks.json
-  dirty_status=$(git -C "$WT_DIR" status --porcelain)
-  assert_contains "$dirty_status" ".agents/hooks.json" "git status must report .agents/hooks.json as dirty"
-
-  # Worker's edits must be KEPT on disk, and fm-crew-busy must be pruned
+  # Worker's edits must be KEPT on disk
   assert_present "$hooks" "hooks.json was deleted on refused teardown"
   jq -e '."worker-hook"' "$hooks" >/dev/null || fail "worker's edits were dropped"
   jq -e '."existing-hook"' "$hooks" >/dev/null || fail "existing hooks were dropped"
-  if jq -e '."fm-crew-busy"' "$hooks" >/dev/null 2>&1; then
-    fail "fm-crew-busy was not pruned"
-  fi
 
-  # Skip-worktree must be cleared so git status sees the worker's changes
-  ls_flags=$(git -C "$WT_DIR" ls-files -v .agents/hooks.json | awk '{print $1}')
-  [ "$ls_flags" = "H" ] || fail "tracked .agents/hooks.json must have normal status (H), got '$ls_flags'"
+  pass "agy crewmate: worker edits to tracked hooks.json are visible to git status and refuse teardown loudly"
+}
 
-  pass "agy crewmate: worker edits to tracked hooks.json are preserved and refuse teardown loudly"
+test_teardown_preserves_unparseable_or_missing_jq_hooks() {
+  local case_dir wt unparseable_hooks rc=0
+  case_dir="$TMP_ROOT/unparseable-hooks"
+  mkdir -p "$case_dir/wt/.agents"
+  wt="$case_dir/wt"
+  unparseable_hooks="$wt/.agents/hooks.json"
+  printf 'NOT VALID JSON {{{{ \n' > "$unparseable_hooks"
+
+  # Sourcing fm-teardown.sh functions to test cleanup_worktree_agents_hooks directly
+  (
+    # shellcheck source=bin/fm-teardown.sh
+    . "$ROOT/bin/fm-teardown.sh" --help >/dev/null 2>&1 || true
+    cleanup_worktree_agents_hooks "$wt"
+  ) 2>/dev/null || rc=$?
+  [ "$rc" -ne 0 ] || fail "cleanup must refuse when hooks.json is unparseable"
+  assert_present "$unparseable_hooks" "unparseable hooks.json was deleted by cleanup"
+  assert_contains "$(cat "$unparseable_hooks")" "NOT VALID JSON" "unparseable hooks.json content was modified"
+
+  pass "teardown: unparseable hooks.json is preserved and refuses cleanup"
 }
 
 test_agy_crew_spawn_installs_hooks_and_turnend_notifies
-test_agy_crew_spawn_merges_with_existing_hooks
+test_agy_crew_spawn_preserves_existing_project_hooks
 test_agy_crew_wiring_cleanup_preserves_other_hooks
 test_agy_crew_worker_edits_to_tracked_hooks_preserved_and_refuses_teardown
+test_teardown_preserves_unparseable_or_missing_jq_hooks
 test_agy_secondmate_spawn_and_trust
 
 echo "all fm-agy-crew-turnend tests passed"

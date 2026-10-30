@@ -927,8 +927,9 @@ test_agy_spawn_arms_busy_wiring() {
   expect_code 0 "$rc" "agy spawn should succeed: $out"
   statedir="$HOME_DIR/state"
   [ -f "$statedir/$id.busy-gen" ] || fail "agy spawn did not arm busy generation"
-  hooks_file="$WT_DIR/.agents/hooks.json"
-  [ -f "$hooks_file" ] || fail "agy spawn did not write hooks.json"
+  hooks_file="$WT_DIR/.agents/plugins/fm-crew-busy/hooks.json"
+  [ -f "$hooks_file" ] || fail "agy spawn did not write hooks.json in plugin dir"
+  [ -f "$WT_DIR/.agents/plugins/fm-crew-busy/plugin.json" ] || fail "agy spawn did not write plugin.json"
   jq -e '."fm-crew-busy".Stop' "$hooks_file" >/dev/null \
     || fail "hooks.json lacks fm-crew-busy Stop hook"
   jq -e '."fm-crew-busy".PreInvocation' "$hooks_file" >/dev/null \

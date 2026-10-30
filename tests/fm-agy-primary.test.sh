@@ -237,23 +237,21 @@ test_guard_inert_when_supervision_not_needed() {
   pass "fm-turnend-guard-agy: inert when no supervision needed"
 }
 
-test_guard_inert_when_only_passive_checks_exist() {
+test_guard_inert_when_only_untrusted_checks_exist() {
   local dir out decision
-  dir=$(make_primary_dir "$TMP_ROOT/passive-checks")
+  dir=$(make_primary_dir "$TMP_ROOT/untrusted-checks")
+  # An untrusted check script without .check-trust binding does not need supervision
   : > "$dir/state/sample.check.sh"
   chmod +x "$dir/state/sample.check.sh"
-  : > "$dir/state/sample.check-trust"
-  mkdir -p "$dir/state/procevent"
-  : > "$dir/state/procevent/sample.source"
 
   out=$(run_guard "$dir")
   decision=$(decision_of "$out")
-  [ "$decision" = "allow" ] || fail "home with only passive checks must allow stop, got: $out"
-  pass "fm-turnend-guard-agy: inert when only passive checks exist and no work in flight"
+  [ "$decision" = "allow" ] || fail "home with only untrusted checks must allow stop, got: $out"
+  pass "fm-turnend-guard-agy: inert when only untrusted checks exist and no work in flight"
 }
 
-test_guard_inert_when_inflight_tasks_are_idle() {
-  local dir out decision
+test_guard_blocks_when_inflight_tasks_or_checks_need_supervision_without_watcher() {
+  local dir out decision reason
   dir=$(make_primary_dir "$TMP_ROOT/inflight-idle")
   : > "$dir/state/task1.meta"
   printf 'pr=https://github.com/example/repo/pull/1\n' >> "$dir/state/task1.meta"
@@ -262,8 +260,21 @@ test_guard_inert_when_inflight_tasks_are_idle() {
 
   out=$(run_guard "$dir")
   decision=$(decision_of "$out")
-  [ "$decision" = "allow" ] || fail "home with only idle PR-registered tasks must allow stop, got: $out"
-  pass "fm-turnend-guard-agy: inert when in-flight tasks are idle PR-registered tasks"
+  [ "$decision" = "continue" ] || fail "home with idle PR task without watcher must emit continue, got: $out"
+  reason=$(reason_of "$out")
+  case "$reason" in
+    *'TURN WOULD END BLIND'*) ;;
+    *) fail "expected repair banner in reason, got: $reason" ;;
+  esac
+
+  # Same with registered custom checks
+  rm -f "$dir/state/task1.meta" "$dir/state/task1.busy-state" "$dir/state/task1.status"
+  : > "$dir/state/custom.check.sh"
+  : > "$dir/state/custom.check-trust"
+  out=$(run_guard "$dir")
+  decision=$(decision_of "$out")
+  [ "$decision" = "continue" ] || fail "home with registered check without watcher must emit continue, got: $out"
+  pass "fm-turnend-guard-agy: blocks when idle PR tasks or registered checks need supervision without watcher"
 }
 
 test_guard_allows_stop_immediately_when_watcher_healthy() {
@@ -434,8 +445,8 @@ test_guard_inert_on_foreign_host
 test_guard_inert_on_non_model_stop
 test_guard_inert_in_away_mode
 test_guard_inert_when_supervision_not_needed
-test_guard_inert_when_only_passive_checks_exist
-test_guard_inert_when_inflight_tasks_are_idle
+test_guard_inert_when_only_untrusted_checks_exist
+test_guard_blocks_when_inflight_tasks_or_checks_need_supervision_without_watcher
 test_guard_allows_stop_immediately_when_watcher_healthy
 test_guard_blocks_when_inflight_task_done_unregistered
 test_guard_delivers_queued_wake_even_when_task_worker_idle
