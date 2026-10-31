@@ -268,10 +268,10 @@ test_teardown_preserves_unparseable_or_missing_jq_hooks() {
   unparseable_hooks="$wt/.agents/hooks.json"
   printf 'NOT VALID JSON {{{{ \n' > "$unparseable_hooks"
 
-  # Sourcing fm-teardown.sh functions to test cleanup_worktree_agents_hooks directly
+  # Sourcing fm-control-lib.sh functions to test cleanup_worktree_agents_hooks directly
   (
-    # shellcheck source=bin/fm-teardown.sh
-    . "$ROOT/bin/fm-teardown.sh" --help >/dev/null 2>&1 || true
+    # shellcheck source=bin/fm-control-lib.sh
+    . "$ROOT/bin/fm-control-lib.sh"
     cleanup_worktree_agents_hooks "$wt"
   ) 2>/dev/null || rc=$?
   [ "$rc" -ne 0 ] || fail "cleanup must refuse when hooks.json is unparseable"
@@ -281,11 +281,43 @@ test_teardown_preserves_unparseable_or_missing_jq_hooks() {
   pass "teardown: unparseable hooks.json is preserved and refuses cleanup"
 }
 
+test_teardown_preserves_worker_plugin_files_and_hooks() {
+  local case_dir wt plugin_dir p_json p_hooks worker_file
+  case_dir="$TMP_ROOT/plugin-worker-files"
+  wt="$case_dir/wt"
+  plugin_dir="$wt/.agents/plugins/fm-crew-busy"
+  mkdir -p "$plugin_dir"
+
+  p_json="$plugin_dir/plugin.json"
+  p_hooks="$plugin_dir/hooks.json"
+  worker_file="$plugin_dir/worker_file.sh"
+
+  echo '{"name":"fm-crew-busy"}' > "$p_json"
+  echo '{"fm-crew-busy":{"Stop":[]},"worker-custom":{"Stop":[]}}' > "$p_hooks"
+  echo 'echo "worker code"' > "$worker_file"
+
+  (
+    # shellcheck source=bin/fm-control-lib.sh
+    . "$ROOT/bin/fm-control-lib.sh"
+    cleanup_worktree_agents_hooks "$wt"
+  ) 2>/dev/null || fail "cleanup should succeed and preserve worker files"
+
+  assert_present "$worker_file" "worker file in plugin directory was deleted"
+  assert_present "$p_hooks" "plugin hooks.json containing other hooks was deleted"
+  jq -e '."worker-custom"' "$p_hooks" >/dev/null || fail "worker custom hook was removed from plugin hooks.json"
+  jq -e '."fm-crew-busy"' "$p_hooks" >/dev/null && fail "fm-crew-busy hook was not pruned from plugin hooks.json"
+  [ ! -f "$p_json" ] || fail "firstmate-owned plugin.json should have been cleaned up"
+  [ -d "$plugin_dir" ] || fail "plugin directory was deleted despite holding worker file"
+
+  pass "teardown: worker files and custom hooks in plugin directory are preserved"
+}
+
 test_agy_crew_spawn_installs_hooks_and_turnend_notifies
 test_agy_crew_spawn_preserves_existing_project_hooks
 test_agy_crew_wiring_cleanup_preserves_other_hooks
 test_agy_crew_worker_edits_to_tracked_hooks_preserved_and_refuses_teardown
 test_teardown_preserves_unparseable_or_missing_jq_hooks
+test_teardown_preserves_worker_plugin_files_and_hooks
 test_agy_secondmate_spawn_and_trust
 
 echo "all fm-agy-crew-turnend tests passed"

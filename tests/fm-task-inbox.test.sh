@@ -410,6 +410,41 @@ test_ring_submits_its_own_stuck_doorbell() {
   pass "inbox: the ring submits its own stuck doorbell, skips other pending text, and retries a lost Enter once on both paths"
 }
 
+test_inbox_composer_holds_matches_agy_leading_gt() {
+  local test_cap state
+  state="$TMP_ROOT/holds-agy/state"
+  mkdir -p "$state"
+  test_cap=$(printf '● Reply landed\n────────────────────────\n> please continue\n────────────────────────\n  ? for shortcuts')
+
+  (
+    # shellcheck source=bin/fm-composer-lib.sh
+    . "$ROOT/bin/fm-composer-lib.sh"
+    # shellcheck source=bin/fm-task-inbox-lib.sh
+    . "$ROOT/bin/fm-task-inbox-lib.sh"
+    fm_backend_source() { return 0; }
+    fm_backend_capture() { printf '%s\n' "$test_cap"; }
+    fm_backend_composer_identity() { printf 'agy\tidle'; }
+
+    fm_task_inbox_composer_holds dummy_backend dummy_target "please continue" \
+      || fail "fm_task_inbox_composer_holds must match agy composer holding doorbell with leading >"
+
+    if fm_task_inbox_composer_holds dummy_backend dummy_target "someone elses draft"; then
+      fail "fm_task_inbox_composer_holds must not match unrelated draft on agy"
+    fi
+
+    # For non-agy (pi), leading > is user quoted text
+    fm_backend_composer_identity() { printf 'pi\tidle'; }
+    if fm_task_inbox_composer_holds dummy_backend dummy_target "please continue"; then
+      fail "fm_task_inbox_composer_holds must not strip leading > for pi"
+    fi
+
+    fm_task_inbox_composer_holds dummy_backend dummy_target "> please continue" \
+      || fail "fm_task_inbox_composer_holds must match exact text with > for pi"
+  )
+
+  pass "inbox: fm_task_inbox_composer_holds passes identity to strip leading > for agy while preserving user text for other harnesses"
+}
+
 test_idempotent_write_dedups_exact_body() {
   local state r1 r2 r3 r4 count text
   state="$TMP_ROOT/idem/state"; mkdir -p "$state"
@@ -1198,6 +1233,7 @@ test_doorbell_is_a_shell_noop
 test_doorbell_rejects_terminal_controls
 test_ring_skips_dead_agent
 test_ring_submits_its_own_stuck_doorbell
+test_inbox_composer_holds_matches_agy_leading_gt
 test_idempotent_write_dedups_exact_body
 test_idempotent_write_follows_concurrent_ack
 test_handled_mv_dedups_by_sequence
